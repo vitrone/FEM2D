@@ -59,6 +59,7 @@ const matlib_index FEM2D_INDEX_V2 = 1;
 const matlib_index FEM2D_INDEX_V3 = 2;   
 const matlib_index FEM2D_NV = 3;   /* nr of vertices of a triangular element */ 
 
+const matlib_index FEM2D_INIT_VPATCH_SIZE = 10;
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -171,8 +172,9 @@ fem2d_err fem2d_create_ea
     err_check( (nodes.elem_p==NULL) || (ia == NULL), clean_up,
                "%s", "Null pointer ecountered!");
 
-    ea->len = nr_domains;
-    ea->nbase = nodes.elem_p;
+    ea->len      = nr_domains;
+    ea->nbase    = nodes.elem_p;
+    ea->nr_nodes = nodes.len;
 
     errno = 0;
     ea->elem_p = calloc( nr_domains, sizeof(fem2d_te));
@@ -187,9 +189,9 @@ fem2d_err fem2d_create_ea
     matlib_real det = 0;
     matlib_real *vert1, *vert2, *vert3;
 
-    for( i = 0, di = 0;
-         i < FEM2D_NV * nr_domains; 
-         i += FEM2D_NV, di++, dptr++)
+    for ( i = 0, di = 0;
+          i < FEM2D_NV * nr_domains; 
+          i += FEM2D_NV, di++, dptr++)
     {
         dptr->domain_index = di;
         debug_body("domain nr: %d", dptr->domain_index);
@@ -249,10 +251,10 @@ fem2d_err fem2d_create_ea
     return FEM2D_SUCCESS;
 
 clean_up:
-    if(mcnt>0)
+    if (mcnt>0)
     {
-        for( ; (i >= 0) && (dptr != NULL); 
-               i -= FEM2D_NV, dptr--)
+        for ( ; (i >= 0) && (dptr != NULL); 
+                i -= FEM2D_NV, dptr--)
         {
             matlib_free(dptr->vert_p);
             matlib_free(dptr->jmat);
@@ -264,18 +266,150 @@ clean_up:
     return FEM2D_FAILURE;
 
 }
+/*============================================================================*/
+
+fem2d_err fem2d_create_vp
+(
+    const matlib_index *const ia,
+          fem2d_ea     *ea
+)
+{
+    debug_enter("nr of nodes: %d", ea->nr_nodes);
+    err_check( (ea->elem_p == NULL) || (ia == NULL), clean_up, 
+               "%s", "Null pointers encountered!");
+
+    matlib_index i = 0, mcnt = 0;
+    matlib_index init_size = FEM2D_INIT_VPATCH_SIZE; /* maximum six domains expected in a patch */
+
+    errno = 0;
+    ea->vpatch_p = calloc( ea->nr_nodes, sizeof(fem2d_vp));
+    err_check( (ea->vpatch_p == NULL), clean_up, 
+                "%s: memory allocation for vertex patch failed (nr nodes: %d)!", 
+                strerror(errno), ea->nr_nodes);
+    mcnt++;
+
+    errno = 0;
+    fem2d_vp* vp_ptr = NULL; 
+    for ( vp_ptr = ea->vpatch_p; 
+          vp_ptr < ea->nr_nodes + ea->vpatch_p; 
+          vp_ptr++)
+    {
+            vp_ptr->domain_index = calloc(init_size, sizeof(matlib_index));
+            err_check( (vp_ptr->domain_index == NULL), clean_up, 
+                        "%s", "Memory allocation failed!", strerror(errno));
+
+            vp_ptr->vert_index   = calloc(init_size, sizeof(matlib_index));
+            err_check( (vp_ptr->vert_index == NULL), clean_up, 
+                        "%s", "Memory allocation failed!", strerror(errno));
+
+            vp_ptr->len = 0;
+    }
+    debug_body("%s", "Memory allocated!");
+    
+    matlib_index tofill, index;
+    bool init_size_OK = true;
+    for ( i = 0; i< ea->len; i++)
+    {
+        index  = FEM2D_NV * i + FEM2D_INDEX_V1;
+        tofill = (ea->vpatch_p[ia[index]]).len;
+        if (tofill <= init_size )
+        {
+            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
+            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V1;
+            (ea->vpatch_p[ia[index]]).len ++;
+        }
+        else
+        {
+            init_size_OK = false;
+            break;
+        }
+
+        index  = FEM2D_NV * i + FEM2D_INDEX_V2;
+        tofill = (ea->vpatch_p[ia[index]]).len;
+        if (tofill <= init_size )
+        {
+            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
+            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V2;
+            (ea->vpatch_p[ia[index]]).len ++;
+        }
+        else
+        {
+            init_size_OK = false;
+            break;
+        }
+
+        index  = FEM2D_NV * i + FEM2D_INDEX_V3;
+        tofill = (ea->vpatch_p[ia[index]]).len;
+        if (tofill <= init_size )
+        {
+            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
+            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V3;
+            (ea->vpatch_p[ia[index]]).len ++;
+        }
+        else
+        {
+            init_size_OK = false;
+            break;
+        }
+    }
+    err_check( !init_size_OK, clean_up, 
+                "%s", "Initial size of the memory allocated is insufficient.\n"
+                "Returning with an error because this means triangulation is really bad!!!");
+
+    /* Resize the length of vectors */
+    for (i = 0; i < ea->nr_nodes; i++)
+    {
+        ea->vpatch_p[i].domain_index = realloc( ea->vpatch_p[i].domain_index, 
+                                                ea->vpatch_p[i].len * sizeof(matlib_index)); 
+        err_check( (ea->vpatch_p[i].domain_index == NULL), clean_up, 
+                        "%s", "Memory reallocation failed!", strerror(errno));
+
+        ea->vpatch_p[i].vert_index = realloc( ea->vpatch_p[i].vert_index, 
+                                              ea->vpatch_p[i].len * sizeof(matlib_index)); 
+        err_check( (ea->vpatch_p[i].vert_index == NULL), clean_up, 
+                        "%s", "Memory reallocation failed!", strerror(errno));
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS");
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt == 1)
+    {
+        for ( ; (vp_ptr < ea->vpatch_p) & (vp_ptr != NULL); 
+                vp_ptr--)
+        {
+            matlib_free(vp_ptr->domain_index);
+            matlib_free(vp_ptr->vert_index);
+        }
+        matlib_free(ea->vpatch_p);
+    }
+    debug_exit("Exit Status: %s", "FAILURE");
+    return FEM2D_FAILURE;
+}
+
 void fem2d_free_ea(fem2d_ea ea)
 {
     fem2d_te* dptr;
 
-    for( dptr = ea.elem_p; 
-         (dptr < (ea.elem_p + ea.len)) && (dptr != NULL);
-         dptr++)
+    for ( dptr = ea.elem_p; 
+          (dptr < (ea.elem_p + ea.len)) && (dptr != NULL);
+          dptr++)
     {
         matlib_free(dptr->vert_p);
         matlib_free(dptr->jmat);
         matlib_free(dptr->ijmat);
     }
+    fem2d_vp* vp_ptr;
+    for ( vp_ptr = ea.vpatch_p; 
+          (vp_ptr < ea.vpatch_p + ea.nr_nodes) & (vp_ptr != NULL); 
+          vp_ptr++)
+    {
+        matlib_free(vp_ptr->domain_index);
+        matlib_free(vp_ptr->vert_index);
+    }
+    matlib_free(ea.vpatch_p);
+
     matlib_free(ea.elem_p);
 }
 
@@ -472,7 +606,7 @@ fem2d_err fem2d_ref2mesh
     return FEM2D_SUCCESS;
     
 clean_up:
-    debug_exit("Exit Status: %d", "FAILURE" );
+    debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 }
 /*============================================================================*/
@@ -575,11 +709,11 @@ fem2d_err fem2d_interp
 
     }
     matlib_free(u1_tmp.elem_p);
-    debug_exit("Exit Status: %d", "SUCCESS" );
+    debug_exit("Exit Status: %s", "SUCCESS" );
     return FEM2D_SUCCESS;
     
 clean_up:
-    debug_exit("Exit Status: %d", "FAILURE" );
+    debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 }
 
@@ -624,20 +758,172 @@ matlib_real fem2d_normL2
     matlib_real norm = 0;
     matlib_real jacob;
 
-    for( matlib_index i=0; i< ea.len; i++)
+    for ( matlib_index i=0; i< ea.len; i++)
     {
         jacob = (ea.elem_p[i]).jacob;
-        for(matlib_index j=0; j< quadW.len; j++, ptr++)
+        for (matlib_index j=0; j< quadW.len; j++, ptr++)
         {
             norm += (*ptr * conj(*ptr) * quadW.elem_p[j] * jacob);
         }
     }
+    debug_exit("Exit Status: %s", "SUCCESS" );
     return sqrt(norm);
 
 clean_up:
 
-    if(mcnt>0)
+    if (mcnt>0)
         matlib_free(u_interp.elem_p);
 
+    debug_exit("Exit Status: %s", "FAILURE" );
     return FP_NAN;
 }
+/*============================================================================*/
+
+matlib_real fem2d_iprod 
+/* Inner product iprod = (u, conj(v))_{\Omega} */ 
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes,
+    matlib_zv v_nodes,
+    matlib_xm vphi,
+    matlib_xv quadW
+)
+{
+    debug_enter( "nr of domains: %d, "
+                 "nr of nodes: %d, "
+                 "vphi: %d-by-%d, quadW: %d",
+                 ea.len, u_nodes.len,
+                 vphi.lenc, vphi.lenr, quadW.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL) 
+               || (v_nodes.elem_p == NULL) 
+               || (vphi.elem_p    == NULL)  
+               || (quadW.elem_p   == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check( ((vphi.lenc != quadW.len) || (vphi.lenr != FEM2D_NV)), clean_up, 
+               "Dimension mis-match (vphi: %d-by-%d, quadW: %d)!",
+               vphi.lenc, vphi.lenr, quadW.len);
+
+    err_check( (u_nodes.len != v_nodes.len), clean_up, 
+               "Dimension mis-match for field vectors (u: %d, v: %d)!",
+               v_nodes.len, u_nodes.len);
+
+    matlib_index mcnt = 0;
+    fem2d_err error;
+
+    matlib_zv u_interp, v_interp;
+    error = matlib_create_zv( ea.len * vphi.lenc, &u_interp, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "Memory allocation for complex vector failed (length: %d)!", 
+               ea.len * vphi.lenc);
+    mcnt++; /* 1 */ 
+    error = matlib_create_zv( ea.len * vphi.lenc, &v_interp, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "Memory allocation for complex vector failed (length: %d)!", 
+               ea.len * vphi.lenc);
+    mcnt++; /* 2 */ 
+
+    error = fem2d_interp(ea, u_nodes, vphi, u_interp);
+    err_check((error == FEM2D_FAILURE), clean_up, "%s", "Interpolation failed!");
+
+    error = fem2d_interp(ea, v_nodes, vphi, v_interp);
+    err_check((error == FEM2D_FAILURE), clean_up, "%s", "Interpolation failed!");
+
+    matlib_complex* uptr = u_interp.elem_p;
+    matlib_complex* vptr = v_interp.elem_p;
+    
+    matlib_real iprod = 0;
+    matlib_real jacob;
+
+    for ( matlib_index i=0; i< ea.len; i++)
+    {
+        jacob = (ea.elem_p[i]).jacob;
+        for (matlib_index j=0; j< quadW.len; j++, uptr++, vptr++)
+        {
+            iprod += (*uptr * conj(*vptr) * quadW.elem_p[j] * jacob);
+        }
+    }
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return iprod;
+
+clean_up:
+
+    if (mcnt==2)
+    {
+        matlib_free(u_interp.elem_p);
+        mcnt--;
+    }
+    if (mcnt==1)
+        matlib_free(u_interp.elem_p);
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FP_NAN;
+} /* fem2d_iprod */ 
+
+/*============================================================================*/
+
+fem2d_err fem2d_quadP
+/* Qudature matrix for computing projection on vertex functions */ 
+(
+    fem2d_cc   xi,
+    matlib_xm* vphi,
+    matlib_xv  quadW
+)
+{
+
+    debug_enter( "length of xi: %d", xi.len);
+
+    err_check( (xi.elem_p==NULL), clean_up, 
+               "%s", "Null pointer ecountered!");
+
+    fem2d_err error; 
+    error = matlib_create_xm( xi.len, FEM2D_NV, vphi, MATLIB_COL_MAJOR, MATLIB_NO_TRANS);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation for basis function-value matrix failed!");
+
+
+    int i;
+    matlib_real *ptr1, *ptr2;
+    
+    ptr2 = vphi->elem_p;
+
+    /* vphi_1 = -(xi_1 + xi_2)/2 
+     * */ 
+    for ( ptr1 = xi.elem_p; 
+          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
+          ptr1 += FEM2D_DIM, ptr2++)
+    {
+        *ptr2 = -0.5*(   *(ptr1 + FEM2D_INDEX_DIM1) 
+                       + *(ptr1 + FEM2D_INDEX_DIM2));
+    }
+    
+    /* vphi_2 = (1 + xi_1)/2 
+     * */ 
+    for ( ptr1 = xi.elem_p; 
+          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
+          ptr1 += FEM2D_DIM, ptr2++)
+    {
+        *ptr2 =  0.5*( 1.0 + *(ptr1 + FEM2D_INDEX_DIM1));
+    }
+
+    /* vphi_3 = (1 + xi_2)/2 
+     * */ 
+    for ( ptr1 = xi.elem_p; 
+          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
+          ptr1 += FEM2D_DIM, ptr2++)
+    {
+        *ptr2 =  0.5*( 1.0 + *(ptr1 + FEM2D_INDEX_DIM2));
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS");
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return FEM2D_FAILURE;
+
+}
+
+

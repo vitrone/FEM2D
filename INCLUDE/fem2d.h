@@ -30,6 +30,14 @@ typedef struct
 
 } fem2d_cc; /* cartesian coordinates in R^2*/ 
 
+typedef struct
+{
+    matlib_index len; /* nr. of domains in the vertex patch */ 
+    matlib_index* domain_index; /* array of domain indices */ 
+    matlib_index* vert_index; /* array of vertex order indices */ 
+
+} fem2d_vp; /* vertex patch */ 
+
 
 typedef struct
 {
@@ -46,7 +54,9 @@ typedef struct
 {
     matlib_real* nbase; /* node base address */ 
     matlib_index len; /* nr of domains */ 
+    matlib_index nr_nodes; /* nr of nodes */ 
     fem2d_te*    elem_p;
+    fem2d_vp*    vpatch_p;
 
 } fem2d_ea; /* element array type */ 
 
@@ -66,7 +76,7 @@ extern const matlib_index FEM2D_INDEX_V1;
 extern const matlib_index FEM2D_INDEX_V2;
 extern const matlib_index FEM2D_INDEX_V3;
 extern const matlib_index FEM2D_NV;
-
+extern const matlib_index FEM2D_INIT_VPATCH_SIZE;
 
 /*============================================================================*/
 
@@ -126,5 +136,21 @@ matlib_real fem2d_normL2
     matlib_zv u_nodes,
     matlib_xm vphi,
     matlib_xv quadW
+);
+
+matlib_real fem2d_iprod 
+/* Inner product iprod = (u, conj(v))_{\Omega} */ 
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes,
+    matlib_zv v_nodes,
+    matlib_xm vphi,
+    matlib_xv quadW
+);
+
+fem2d_err fem2d_create_vp
+(
+    const matlib_index *const ia,
+          fem2d_ea     *ea
 );
 #endif
