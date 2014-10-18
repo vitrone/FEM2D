@@ -6,7 +6,7 @@
  * or wrapper functions.
  *
  * */
-
+#define ENABLE_ERR_CHECKS (1)
 /*
  * Use stringification (#) to log a warning.
  * */ 
@@ -70,7 +70,7 @@
 
 
 #define err_check(EXPR, LABEL, fmt,...)          \
-        do { if(EXPR){                           \
+        do { if((EXPR) && ENABLE_ERR_CHECKS){    \
             fprintf( stderr,                     \
                      "%s:%s: Error: (%s)=TRUE:"  \
                      fmt "\n",                   \

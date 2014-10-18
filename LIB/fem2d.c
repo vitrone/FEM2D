@@ -60,6 +60,11 @@ const matlib_index FEM2D_INDEX_V3 = 2;
 const matlib_index FEM2D_NV = 3;   /* nr of vertices of a triangular element */ 
 
 const matlib_index FEM2D_INIT_VPATCH_SIZE = 10;
+
+const matlib_real MEMI[3][3] = { {1.0/3.0,  1.0/6.0,  1.0/6.0}, 
+                                 {1.0/6.0,  1.0/3.0,  1.0/6.0},
+                                 {1.0/6.0,  1.0/6.0,  1.0/3.0}};
+
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -110,10 +115,10 @@ fem2d_err fem2d_refbasis
     int i;
     matlib_real *ptr1, *ptr2;
     
-    ptr2 = vphi->elem_p;
-
     /* vphi_1 = -(xi_1 + xi_2)/2 
      * */ 
+    ptr2 = vphi->elem_p + FEM2D_INDEX_V1 * xi.len;
+
     for ( ptr1 = xi.elem_p; 
           ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
           ptr1 += FEM2D_DIM, ptr2++)
@@ -124,6 +129,8 @@ fem2d_err fem2d_refbasis
     
     /* vphi_2 = (1 + xi_1)/2 
      * */ 
+    ptr2 = vphi->elem_p + FEM2D_INDEX_V2 * xi.len;
+
     for ( ptr1 = xi.elem_p; 
           ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
           ptr1 += FEM2D_DIM, ptr2++)
@@ -133,6 +140,8 @@ fem2d_err fem2d_refbasis
 
     /* vphi_3 = (1 + xi_2)/2 
      * */ 
+    ptr2 = vphi->elem_p + FEM2D_INDEX_V3 * xi.len;
+
     for ( ptr1 = xi.elem_p; 
           ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
           ptr1 += FEM2D_DIM, ptr2++)
@@ -146,7 +155,6 @@ fem2d_err fem2d_refbasis
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
-
 }
 
 /*============================================================================*/
@@ -175,6 +183,7 @@ fem2d_err fem2d_create_ea
     ea->len      = nr_domains;
     ea->nbase    = nodes.elem_p;
     ea->nr_nodes = nodes.len;
+    ea->vpatch_p = NULL;
 
     errno = 0;
     ea->elem_p = calloc( nr_domains, sizeof(fem2d_te));
@@ -194,7 +203,6 @@ fem2d_err fem2d_create_ea
           i += FEM2D_NV, di++, dptr++)
     {
         dptr->domain_index = di;
-        debug_body("domain nr: %d", dptr->domain_index);
         errno = 0;
         dptr->vert_p = calloc( FEM2D_NV, sizeof(matlib_real*));
         err_check( (ea->elem_p == NULL), clean_up, 
@@ -439,21 +447,22 @@ fem2d_err fem2d_create_ia
     {
 
         /* Get the first vertex */ 
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1) 
                                - (matlib_index)nptr0)/vsize);
         *(ia+0) = offset;
 
 
         /* Get the second vertex */
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p+1) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2) 
                                - (matlib_index)nptr0)/vsize);
         *(ia+1) = offset;
 
         /* Get the third vertex */
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p+2) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3) 
                                - (matlib_index)nptr0)/vsize);
         *(ia+2) = offset;
 
+    }
     debug_exit("Exit Status: %s", "SUCCESS");
     return FEM2D_SUCCESS;
 
@@ -461,7 +470,6 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
 
-    }
 }
 /*============================================================================*/
 
@@ -595,7 +603,7 @@ fem2d_err fem2d_ref2mesh
         
         matlib_xgemm( alpha, vphi_tmp, nodes_mat, beta, x_tmp );
         
-        DEBUG_PRINT_XM(x_tmp, "Points in domain[%d]: ", dptr->domain_index);
+        //DEBUG_PRINT_XM(x_tmp, "Points in domain[%d]: ", dptr->domain_index);
 
         x_tmp.elem_p = x_tmp.elem_p + FEM2D_DIM * vphi.lenc;
     }
@@ -628,9 +636,15 @@ fem2d_err fem2d_interp
     debug_enter( "length of u_nodes: %d", 
                  u_nodes.len);
     
-    err_check( ((ea.elem_p == NULL)   || (u_nodes.elem_p == NULL)) 
-               || (vphi.elem_p == NULL), clean_up, 
+    err_check(    (ea.elem_p      == NULL)   
+               || (u_nodes.elem_p == NULL) 
+               || (vphi.elem_p    == NULL), clean_up, 
                "%s", "Null pointers ecountered!");
+    
+    /* Length of u_nodes = nr. of nodes */ 
+    err_check( (u_nodes.len != ea.nr_nodes ), clean_up, 
+               "Dimension mismatch (u_nodes: %d, nr nodes: )",
+               u_nodes.len, ea.nr_nodes);
 
     /* Length of u_interp = nr of quad. nodes x nr of domains 
      * */ 
@@ -644,9 +658,13 @@ fem2d_err fem2d_interp
     matlib_index INDEX_IMAG  = 1;
     matlib_index COMPLEX_DIM = 2; /* Dimension of a compelex plane */ 
 
+    matlib_index mcnt = 0;
     matlib_xm u1_tmp;    
-    matlib_create_xm( FEM2D_NV, COMPLEX_DIM, &u1_tmp, 
-                      MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
+    fem2d_err error = matlib_create_xm( FEM2D_NV, COMPLEX_DIM, &u1_tmp, 
+                                        MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation failed!");
+    mcnt++;
 
     matlib_xm u2_tmp = { .lenc   = vphi.lenc, 
                          .lenr   = COMPLEX_DIM, 
@@ -677,7 +695,7 @@ fem2d_err fem2d_interp
         ptr = u1_tmp.elem_p;
 
         /* Get the first vertex */ 
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1) 
                                - (matlib_index)nptr0)/vsize);
         uptr = uptr0 + offset; 
         *ptr = uptr[INDEX_REAL]; ptr++;
@@ -686,7 +704,7 @@ fem2d_err fem2d_interp
                     dptr->domain_index, uptr[INDEX_REAL], uptr[INDEX_IMAG], offset );
 
         /* Get the second vertex */
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p+1) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2) 
                                - (matlib_index)nptr0)/vsize);
         uptr = uptr0 + offset; 
         *ptr = uptr[INDEX_REAL]; ptr++;
@@ -695,7 +713,7 @@ fem2d_err fem2d_interp
                     dptr->domain_index, uptr[INDEX_REAL], uptr[INDEX_IMAG], offset);
 
         /* Get the third vertex */
-        offset = (matlib_index)(((matlib_index)*(dptr->vert_p+2) 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p+ + FEM2D_INDEX_V3) 
                                - (matlib_index)nptr0)/vsize);
         uptr = uptr0 + offset;
         *ptr = uptr[INDEX_REAL]; ptr++;
@@ -703,7 +721,9 @@ fem2d_err fem2d_interp
         debug_body( "domain: %d, u: %0.16f%+0.16fi, offset: %d", 
                     dptr->domain_index, uptr[INDEX_REAL], uptr[INDEX_IMAG], offset );
         
-        matlib_xgemm( alpha, vphi_tmp, u1_tmp, beta, u2_tmp );
+        error = matlib_xgemm( alpha, vphi_tmp, u1_tmp, beta, u2_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Matrix multiplication failed!");
   
         u2_tmp.elem_p = u2_tmp.elem_p + COMPLEX_DIM * vphi.lenc; 
 
@@ -713,6 +733,8 @@ fem2d_err fem2d_interp
     return FEM2D_SUCCESS;
     
 clean_up:
+    if (mcnt==1)
+        matlib_free(u1_tmp.elem_p);
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 }
@@ -721,44 +743,29 @@ clean_up:
 matlib_real fem2d_normL2
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes,
-    matlib_xm vphi,
+    matlib_zv u_qnodes,
     matlib_xv quadW
 )
 {
     debug_enter( "nr of domains: %d, "
                  "nr of nodes: %d, "
-                 "vphi: %d-by-%d, quadW: %d",
-                 ea.len, u_nodes.len,
-                 vphi.lenc, vphi.lenr, quadW.len);
+                 "nr of quadrature nodes: %d",
+                 ea.len, ea.nr_nodes, quadW.len);
     
-    err_check( ((ea.elem_p == NULL)    || (u_nodes.elem_p == NULL)) 
-            || ((vphi.elem_p == NULL)  || (quadW.elem_p == NULL)), clean_up, 
+    err_check(    (ea.elem_p       == NULL) 
+               || (u_qnodes.elem_p == NULL) 
+               || (quadW.elem_p    == NULL), clean_up,
                "%s", "Null pointers ecountered!");
 
-    err_check( ((vphi.lenc != quadW.len) || (vphi.lenr != FEM2D_NV)), clean_up, 
-               "Dimension mis-match (vphi: %d-by-%d, quadW: %d)!",
-               vphi.lenc, vphi.lenr, quadW.len);
+    err_check( (u_qnodes.len != quadW.len * ea.len), clean_up, 
+               "%s", "Dimension mis-match!");
 
-    matlib_index mcnt = 0;
-    fem2d_err error;
-
-    matlib_zv u_interp;
-    error = matlib_create_zv( ea.len * vphi.lenc, &u_interp, MATLIB_COL_VECT);
-    err_check( (error == FEM2D_FAILURE), clean_up, 
-               "Memory allocation for complex vector failed (length: %d)!", 
-               ea.len * vphi.lenc);
-    mcnt++;
-
-    error = fem2d_interp(ea, u_nodes, vphi, u_interp);
-    err_check((error == FEM2D_FAILURE), clean_up, "%s", "Interpolation failed!");
-
-    matlib_complex* ptr = u_interp.elem_p;
+    matlib_complex* ptr = u_qnodes.elem_p;
     
     matlib_real norm = 0;
     matlib_real jacob;
 
-    for ( matlib_index i=0; i< ea.len; i++)
+    for ( matlib_index i = 0; i< ea.len; i++)
     {
         jacob = (ea.elem_p[i]).jacob;
         for (matlib_index j=0; j< quadW.len; j++, ptr++)
@@ -770,77 +777,49 @@ matlib_real fem2d_normL2
     return sqrt(norm);
 
 clean_up:
-
-    if (mcnt>0)
-        matlib_free(u_interp.elem_p);
-
     debug_exit("Exit Status: %s", "FAILURE" );
-    return FP_NAN;
+    return MATLIB_NAN;
 }
+
 /*============================================================================*/
 
 matlib_real fem2d_iprod 
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes,
-    matlib_zv v_nodes,
-    matlib_xm vphi,
+    matlib_zv u_qnodes,
+    matlib_zv v_qnodes,
     matlib_xv quadW
 )
 {
     debug_enter( "nr of domains: %d, "
                  "nr of nodes: %d, "
-                 "vphi: %d-by-%d, quadW: %d",
-                 ea.len, u_nodes.len,
-                 vphi.lenc, vphi.lenr, quadW.len);
+                 "nr of quadrature nodes: %d",
+                 ea.len, ea.nr_nodes, quadW.len);
     
-    err_check(    (ea.elem_p      == NULL)    
-               || (u_nodes.elem_p == NULL) 
-               || (v_nodes.elem_p == NULL) 
-               || (vphi.elem_p    == NULL)  
-               || (quadW.elem_p   == NULL), clean_up, 
+    err_check(    (ea.elem_p       == NULL)    
+               || (u_qnodes.elem_p == NULL) 
+               || (v_qnodes.elem_p == NULL) 
+               || (quadW.elem_p    == NULL), clean_up, 
                "%s", "Null pointers ecountered!");
 
-    err_check( ((vphi.lenc != quadW.len) || (vphi.lenr != FEM2D_NV)), clean_up, 
-               "Dimension mis-match (vphi: %d-by-%d, quadW: %d)!",
-               vphi.lenc, vphi.lenr, quadW.len);
+    err_check( (u_qnodes.len != v_qnodes.len),
+               clean_up, "Dimension mis-match for field vectors (u: %d, v: %d)!",
+               v_qnodes.len, u_qnodes.len );
 
-    err_check( (u_nodes.len != v_nodes.len), clean_up, 
-               "Dimension mis-match for field vectors (u: %d, v: %d)!",
-               v_nodes.len, u_nodes.len);
+    err_check( (v_qnodes.len != quadW.len * ea.len), clean_up, 
+               "%s", "Dimension mis-match!");
 
-    matlib_index mcnt = 0;
-    fem2d_err error;
-
-    matlib_zv u_interp, v_interp;
-    error = matlib_create_zv( ea.len * vphi.lenc, &u_interp, MATLIB_COL_VECT);
-    err_check( (error == FEM2D_FAILURE), clean_up, 
-               "Memory allocation for complex vector failed (length: %d)!", 
-               ea.len * vphi.lenc);
-    mcnt++; /* 1 */ 
-    error = matlib_create_zv( ea.len * vphi.lenc, &v_interp, MATLIB_COL_VECT);
-    err_check( (error == FEM2D_FAILURE), clean_up, 
-               "Memory allocation for complex vector failed (length: %d)!", 
-               ea.len * vphi.lenc);
-    mcnt++; /* 2 */ 
-
-    error = fem2d_interp(ea, u_nodes, vphi, u_interp);
-    err_check((error == FEM2D_FAILURE), clean_up, "%s", "Interpolation failed!");
-
-    error = fem2d_interp(ea, v_nodes, vphi, v_interp);
-    err_check((error == FEM2D_FAILURE), clean_up, "%s", "Interpolation failed!");
-
-    matlib_complex* uptr = u_interp.elem_p;
-    matlib_complex* vptr = v_interp.elem_p;
+    matlib_complex* uptr = u_qnodes.elem_p;
+    matlib_complex* vptr = v_qnodes.elem_p;
     
     matlib_real iprod = 0;
     matlib_real jacob;
 
-    for ( matlib_index i=0; i< ea.len; i++)
+    for ( matlib_index i = 0; i< ea.len; i++)
     {
         jacob = (ea.elem_p[i]).jacob;
-        for (matlib_index j=0; j< quadW.len; j++, uptr++, vptr++)
+        for (matlib_index j = 0; j< quadW.len; j++, uptr++, vptr++)
         {
             iprod += (*uptr * conj(*vptr) * quadW.elem_p[j] * jacob);
         }
@@ -849,81 +828,406 @@ matlib_real fem2d_iprod
     return iprod;
 
 clean_up:
-
-    if (mcnt==2)
-    {
-        matlib_free(u_interp.elem_p);
-        mcnt--;
-    }
-    if (mcnt==1)
-        matlib_free(u_interp.elem_p);
-
     debug_exit("Exit Status: %s", "FAILURE" );
-    return FP_NAN;
+    return MATLIB_NAN;
 } /* fem2d_iprod */ 
 
 /*============================================================================*/
 
 fem2d_err fem2d_quadP
-/* Qudature matrix for computing projection on vertex functions */ 
+/* Quadrature matrix for computing projection on vertex functions 
+ * */ 
 (
-    fem2d_cc   xi,
-    matlib_xm* vphi,
-    matlib_xv  quadW
+    matlib_xm  vphi,
+    matlib_xv  quadW,
+    matlib_xm* quadP
 )
 {
+    debug_enter( "nr of quadrature points: %d", quadW.len);
 
-    debug_enter( "length of xi: %d", xi.len);
-
-    err_check( (xi.elem_p==NULL), clean_up, 
+    err_check(    (vphi.elem_p  == NULL) 
+               || (quadW.elem_p == NULL), clean_up, 
                "%s", "Null pointer ecountered!");
 
     fem2d_err error; 
-    error = matlib_create_xm( xi.len, FEM2D_NV, vphi, MATLIB_COL_MAJOR, MATLIB_NO_TRANS);
+    error = matlib_create_xm( FEM2D_NV, vphi.lenc, quadP, 
+                              MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
     err_check( (error == FEM2D_FAILURE), clean_up, 
-               "%s", "Memory allocation for basis function-value matrix failed!");
+               "%s", "Memory allocation for projection matrix failed!");
 
+    matlib_real* ptr1 = quadW.elem_p;
+    matlib_real* ptr2 = vphi.elem_p;
+    matlib_real* ptr3 = quadP->elem_p;
 
-    int i;
-    matlib_real *ptr1, *ptr2;
-    
-    ptr2 = vphi->elem_p;
-
-    /* vphi_1 = -(xi_1 + xi_2)/2 
-     * */ 
-    for ( ptr1 = xi.elem_p; 
-          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
-          ptr1 += FEM2D_DIM, ptr2++)
+    for ( ; ptr1 < (quadW.elem_p + quadW.len);
+            ptr1++, ptr2++, ptr3++)
     {
-        *ptr2 = -0.5*(   *(ptr1 + FEM2D_INDEX_DIM1) 
-                       + *(ptr1 + FEM2D_INDEX_DIM2));
+        *ptr3 = *ptr1 * *ptr2;
     }
     
-    /* vphi_2 = (1 + xi_1)/2 
-     * */ 
-    for ( ptr1 = xi.elem_p; 
-          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
-          ptr1 += FEM2D_DIM, ptr2++)
+    ptr1 = quadW.elem_p;
+
+    for ( ; ptr1 < (quadW.elem_p + quadW.len);
+            ptr1++, ptr2++, ptr3++)
     {
-        *ptr2 =  0.5*( 1.0 + *(ptr1 + FEM2D_INDEX_DIM1));
+        *ptr3 = *ptr1 * *ptr2;
     }
 
-    /* vphi_3 = (1 + xi_2)/2 
-     * */ 
-    for ( ptr1 = xi.elem_p; 
-          ptr1 < (xi.elem_p + FEM2D_DIM * xi.len);
-          ptr1 += FEM2D_DIM, ptr2++)
+    ptr1 = quadW.elem_p;
+
+    for ( ; ptr1 < (quadW.elem_p + quadW.len);
+            ptr1++, ptr2++, ptr3++)
     {
-        *ptr2 =  0.5*( 1.0 + *(ptr1 + FEM2D_INDEX_DIM2));
+        *ptr3 = *ptr1 * *ptr2;
     }
 
     debug_exit("Exit Status: %s", "SUCCESS");
     return FEM2D_SUCCESS;
 
 clean_up:
+    matlib_free(quadP->elem_p);
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
-
 }
+/*============================================================================*/
+
+fem2d_err fem2d_prj
+(
+    fem2d_ea  ea,
+    matlib_zv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_xm quadP,
+    matlib_zv u_prj
+
+)
+{
+    debug_enter( "nr of domains: %d, "
+                 "quadP: %d-by-%d, ",
+                 ea.len, quadP.lenc, quadP.lenr);
+    
+    err_check(   (ea.elem_p       == NULL)    
+              || (u_qnodes.elem_p == NULL) 
+              || (quadP.elem_p    == NULL)  
+              || (u_prj.elem_p    == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_qnodes.len != quadP.lenr * ea.len) 
+               || (quadP.lenc   != FEM2D_NV), clean_up, 
+               "Dimension mis-match (u_qnodes: %d, quadP: %d-by-%d)!",
+               u_qnodes.len, quadP.lenc, quadP.lenr);
+
+    matlib_index INDEX_REAL  = 0;
+    matlib_index INDEX_IMAG  = 1;
+    matlib_index COMPLEX_DIM = 2; /* Dimension of a compelex plane */ 
+
+    matlib_xm u1_tmp = { .lenc   = quadP.lenr, 
+                         .lenr   = COMPLEX_DIM, 
+                         .order  = MATLIB_ROW_MAJOR,
+                         .op     = MATLIB_NO_TRANS,
+                         .elem_p = (matlib_real*)u_qnodes.elem_p };
+
+    matlib_index mcnt = 0;
+    matlib_xm u2_tmp;    
+    fem2d_err error = matlib_create_xm( FEM2D_NV, COMPLEX_DIM, &u2_tmp, 
+                                        MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation for projection failed!");
+    mcnt++;
+
+    matlib_real alpha = 1.0;
+    matlib_real beta  = 0.0;
+    
+    matlib_index offset;
+    matlib_index vsize = (matlib_index)sizeof(matlib_real*);
+
+    fem2d_te* dptr; /* domain pointer */
+    matlib_real* nptr0 = ea.nbase; /* base address for nodes */ 
+    matlib_real* uprj_ptr0 = (matlib_real*)u_prj.elem_p; /* base address */ 
+    matlib_real* uprj_ptr;
+
+    for ( dptr = ea.elem_p; 
+          (dptr < (ea.len + ea.elem_p)) && (error != FEM2D_FAILURE); dptr++)
+    {
+        alpha = dptr->jacob;
+        error = matlib_xgemm( alpha, quadP, u1_tmp, beta, u2_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Matrix multiplication failed!");
+        
+        /* Get the first vertex */ 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1 ) 
+                               - (matlib_index)nptr0)/vsize);
+        uprj_ptr = uprj_ptr0 + offset; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V1 * COMPLEX_DIM];
+        uprj_ptr[INDEX_IMAG] += u2_tmp.elem_p[INDEX_IMAG + FEM2D_INDEX_V1 * COMPLEX_DIM];
+
+        /* Get the second vertex */ 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2 ) 
+                               - (matlib_index)nptr0)/vsize);
+        uprj_ptr = uprj_ptr0 + offset; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V2 * COMPLEX_DIM];
+        uprj_ptr[INDEX_IMAG] += u2_tmp.elem_p[INDEX_IMAG + FEM2D_INDEX_V2 * COMPLEX_DIM];
+
+        /* Get the third vertex */ 
+        offset = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3 ) 
+                               - (matlib_index)nptr0)/vsize);
+        uprj_ptr = uprj_ptr0 + offset; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V3 * COMPLEX_DIM];
+        uprj_ptr[INDEX_IMAG] += u2_tmp.elem_p[INDEX_IMAG + FEM2D_INDEX_V3 * COMPLEX_DIM];
 
 
+        u1_tmp.elem_p = u1_tmp.elem_p + COMPLEX_DIM * quadP.lenr; 
+    }
+
+
+    matlib_free(u2_tmp.elem_p);
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+
+    if (mcnt == 1)
+        matlib_free(u2_tmp.elem_p);
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2_prj */ 
+
+/*============================================================================*/
+
+fem2d_err fem2d_LEprj
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_prj
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (u_prj.elem_p   == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check( (u_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, ea.nr_nodes);
+
+    matlib_index offset;
+    matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
+
+    fem2d_te* dptr; /* domain pointer */
+    matlib_real* nptr0 = ea.nbase; /* base address for nodes */ 
+    
+    matlib_complex* uptr0     = u_nodes.elem_p; /* base address */ 
+    matlib_complex* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_complex* uprj_ptr;
+    matlib_complex* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_complex f1, f2, f3;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+        offset1 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset2 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset3 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3 ) 
+                             - (matlib_index)nptr0)/vsize);
+
+        uptr = uptr0 + offset1; f1 = *uptr * jacob;
+        uptr = uptr0 + offset2; f2 = *uptr * jacob;
+        uptr = uptr0 + offset3; f3 = *uptr * jacob;
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset1;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * f3);
+        
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset2;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * f3);
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset3;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * f3);
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2d_LEprj */ 
+/*============================================================================*/
+matlib_real fem2d_LEnormL2
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes /* values at the nodes */ 
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, v_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, ea.nr_nodes);
+
+
+    matlib_index offset;
+    matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
+
+    fem2d_te* dptr; /* domain pointer */
+    matlib_real* nptr0 = ea.nbase; /* base address for nodes */ 
+    
+    matlib_complex* uptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_complex* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_complex f1, f2, f3;
+    matlib_real f11, f12, f13, f23, f22, f33;
+
+    matlib_real sum = 0;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+        offset1 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset2 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset3 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3 ) 
+                             - (matlib_index)nptr0)/vsize);
+
+        uptr = uptr0 + offset1; f1 = *uptr;
+        uptr = uptr0 + offset2; f2 = *uptr;
+        uptr = uptr0 + offset3; f3 = *uptr;
+
+        f11 = (matlib_real) f1 * conj(f1) * jacob;
+        f22 = (matlib_real) f2 * conj(f2) * jacob;
+        f33 = (matlib_real) f3 * conj(f3) * jacob;
+
+        f12 = (matlib_real) (f1 * conj(f2) + f2 * conj(f1)) * jacob;
+        f13 = (matlib_real) (f1 * conj(f3) + f3 * conj(f1)) * jacob;
+        f23 = (matlib_real) (f2 * conj(f3) + f3 * conj(f2)) * jacob;
+        
+        sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * f11
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * f22 
+                 + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * f33 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * f12 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * f13 
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * f23 );
+
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sqrt(sum);
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+} /* End of fem2d_LEnormL2 */ 
+/*============================================================================*/
+
+matlib_complex fem2d_LEiprod
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv v_nodes
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (v_nodes.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_nodes.len != ea.nr_nodes) 
+               || (v_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, v_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, v_nodes.len, ea.nr_nodes);
+
+    matlib_index offset;
+    matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
+
+    fem2d_te* dptr; /* domain pointer */
+    matlib_real* nptr0 = ea.nbase; /* base address for nodes */ 
+    
+    matlib_complex* uptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_complex* vptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_complex* uptr;
+    matlib_complex* vptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_complex f1, f2, f3;
+    matlib_complex g1, g2, g3;
+    matlib_complex fg11, fg22, fg33, fg12, fg13, fg23;
+
+    matlib_complex sum = 0;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+        offset1 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset2 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2 ) 
+                             - (matlib_index)nptr0)/vsize);
+        offset3 = (matlib_index)(((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3 ) 
+                             - (matlib_index)nptr0)/vsize);
+
+        uptr = uptr0 + offset1; f1 = *uptr;
+        uptr = uptr0 + offset2; f2 = *uptr;
+        uptr = uptr0 + offset3; f3 = *uptr;
+
+        vptr = vptr0 + offset1; g1 = *vptr;
+        vptr = vptr0 + offset2; g2 = *vptr;
+        vptr = vptr0 + offset3; g3 = *vptr;
+
+        fg11 = f1 * conj(g1) * jacob;
+        fg22 = f2 * conj(g2) * jacob;
+        fg33 = f3 * conj(g3) * jacob;
+
+        fg12 = (matlib_real) (f1 * conj(g2) + f2 * conj(g1)) * jacob;
+        fg13 = (matlib_real) (f1 * conj(f3) + f3 * conj(g1)) * jacob;
+        fg23 = (matlib_real) (f2 * conj(g3) + f3 * conj(g2)) * jacob;
+        
+        sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * fg11
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * fg22 
+                 + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * fg33 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * fg12 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * fg13 
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * fg23 );
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sum;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+}

@@ -744,7 +744,7 @@ matlib_err matlib_xgemm
     }
 
     err_check( !order_OK, clean_up, 
-               "Order of the matrices unknown (A: %s, B: %s, C: %s)!",
+               "Order of the matrices incorrect (A: %s, B: %s, C: %s)!",
                MATLIB_ORDER_ENUM2STR(A.order),
                MATLIB_ORDER_ENUM2STR(B.order),
                MATLIB_ORDER_ENUM2STR(C.order));
@@ -878,7 +878,7 @@ matlib_err matlib_zgemm
     }
 
     err_check( !order_OK, clean_up, 
-               "Order of the matrices unknown (A: %s, B: %s, C: %s)!",
+               "Order of the matrices incorrect (A: %s, B: %s, C: %s)!",
                MATLIB_ORDER_ENUM2STR(A.order),
                MATLIB_ORDER_ENUM2STR(B.order),
                MATLIB_ORDER_ENUM2STR(C.order));

@@ -77,7 +77,7 @@ extern const matlib_index FEM2D_INDEX_V2;
 extern const matlib_index FEM2D_INDEX_V3;
 extern const matlib_index FEM2D_NV;
 extern const matlib_index FEM2D_INIT_VPATCH_SIZE;
-
+extern const matlib_real MEMI[3][3];
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -99,6 +99,12 @@ fem2d_err fem2d_create_ea
     const matlib_index* ia,
     const matlib_index  nr_domains,
           fem2d_ea*     ea
+);
+
+fem2d_err fem2d_create_vp
+(
+    const matlib_index *const ia,
+          fem2d_ea     *ea
 );
 
 void fem2d_free_ea(fem2d_ea ea);
@@ -133,8 +139,7 @@ fem2d_err fem2d_interp
 matlib_real fem2d_normL2
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes,
-    matlib_xm vphi,
+    matlib_zv u_qnodes,
     matlib_xv quadW
 );
 
@@ -142,15 +147,46 @@ matlib_real fem2d_iprod
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes,
-    matlib_zv v_nodes,
-    matlib_xm vphi,
+    matlib_zv u_qnodes,
+    matlib_zv v_qnodes,
     matlib_xv quadW
 );
 
-fem2d_err fem2d_create_vp
+fem2d_err fem2d_quadP
+/* Quadrature matrix for computing projection on vertex functions 
+ * */ 
 (
-    const matlib_index *const ia,
-          fem2d_ea     *ea
+    matlib_xm  vphi,
+    matlib_xv  quadW,
+    matlib_xm* quadP
+);
+
+fem2d_err fem2d_prj
+(
+    fem2d_ea  ea,
+    matlib_zv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_xm quadP,
+    matlib_zv u_prj
+
+);
+
+fem2d_err fem2d_LEprj
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_prj
+);
+
+matlib_real fem2d_LEnormL2
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes /* values at the nodes */ 
+);
+
+matlib_complex fem2d_LEiprod
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv v_nodes
 );
 #endif
