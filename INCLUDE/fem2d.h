@@ -30,11 +30,29 @@ typedef struct
 
 } fem2d_cc; /* cartesian coordinates in R^2*/ 
 
+typedef enum
+{
+    FEM2D_INTERIOR,
+    FEM2D_BOUNDARY
+
+} FEM2D_POINT_T;
+
+
 typedef struct
 {
     matlib_index len; /* nr. of domains in the vertex patch */ 
-    matlib_index* domain_index; /* array of domain indices */ 
+    FEM2D_POINT_T point_enum;
+    
+    /* array of domain indices arrange such that neighbhouring 
+     * domains are next to each other in the list 
+     * */ 
+    matlib_index* domain_index; 
     matlib_index* vert_index; /* array of vertex order indices */ 
+
+    /* index of vertex on the boundary not shared by the next neighbhoiring
+     * domain in the vertex patch
+     * */ 
+    matlib_index* bvert_index; 
 
 } fem2d_vp; /* vertex patch */ 
 
@@ -101,11 +119,7 @@ fem2d_err fem2d_create_ea
           fem2d_ea*     ea
 );
 
-fem2d_err fem2d_create_vp
-(
-    const matlib_index *const ia,
-          fem2d_ea     *ea
-);
+fem2d_err fem2d_create_vp(fem2d_ea *ea);
 
 void fem2d_free_ea(fem2d_ea ea);
 

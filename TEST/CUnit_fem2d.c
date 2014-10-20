@@ -595,7 +595,7 @@ void test_create_ea(void)
         CU_ASSERT_TRUE(e_relative<TOL);
     }
 
-    fem2d_create_vp(ia, &ea);
+    fem2d_create_vp(&ea);
     fem2d_vp* vp_ptr;
     matlib_index j;
     for ( vp_ptr = ea.vpatch_p; 

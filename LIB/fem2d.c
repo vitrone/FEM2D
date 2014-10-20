@@ -276,14 +276,10 @@ clean_up:
 }
 /*============================================================================*/
 
-fem2d_err fem2d_create_vp
-(
-    const matlib_index *const ia,
-          fem2d_ea     *ea
-)
+fem2d_err fem2d_create_vp(fem2d_ea *ea)
 {
     debug_enter("nr of nodes: %d", ea->nr_nodes);
-    err_check( (ea->elem_p == NULL) || (ia == NULL), clean_up, 
+    err_check( (ea->elem_p == NULL), clean_up, 
                "%s", "Null pointers encountered!");
 
     matlib_index i = 0, mcnt = 0;
@@ -314,17 +310,26 @@ fem2d_err fem2d_create_vp
     }
     debug_body("%s", "Memory allocated!");
     
+    matlib_index offset; 
+    matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
     matlib_index tofill, index;
     bool init_size_OK = true;
-    for ( i = 0; i< ea->len; i++)
+
+    matlib_real* nptr0 = ea->nbase;
+    fem2d_vp* vp_ptr0  = ea->vpatch_p;
+    fem2d_vp* vp_ptr1;
+
+    fem2d_te* dptr = ea->elem_p;
+    for ( i = 0; i< ea->len; i++, dptr++)
     {
-        index  = FEM2D_NV * i + FEM2D_INDEX_V1;
-        tofill = (ea->vpatch_p[ia[index]]).len;
+        offset  = ((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V1) - (matlib_index)nptr0)/vsize;
+        vp_ptr1 = vp_ptr0 + offset;
+        tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
-            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V1;
-            (ea->vpatch_p[ia[index]]).len ++;
+            vp_ptr1->domain_index[tofill] = i;
+            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V1;
+            vp_ptr1->len ++;
         }
         else
         {
@@ -332,27 +337,28 @@ fem2d_err fem2d_create_vp
             break;
         }
 
-        index  = FEM2D_NV * i + FEM2D_INDEX_V2;
-        tofill = (ea->vpatch_p[ia[index]]).len;
+        offset  = ((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V2) - (matlib_index)nptr0)/vsize;
+        vp_ptr1 = vp_ptr0 + offset;
+        tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
-            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V2;
-            (ea->vpatch_p[ia[index]]).len ++;
+            vp_ptr1->domain_index[tofill] = i;
+            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V2;
+            vp_ptr1->len ++;
         }
         else
         {
             init_size_OK = false;
             break;
         }
-
-        index  = FEM2D_NV * i + FEM2D_INDEX_V3;
-        tofill = (ea->vpatch_p[ia[index]]).len;
+        offset  = ((matlib_index)*(dptr->vert_p + FEM2D_INDEX_V3) - (matlib_index)nptr0)/vsize;
+        vp_ptr1 = vp_ptr0 + offset;
+        tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            (ea->vpatch_p[ia[index]]).domain_index[tofill] = i;
-            (ea->vpatch_p[ia[index]]).vert_index[tofill]   = FEM2D_INDEX_V3;
-            (ea->vpatch_p[ia[index]]).len ++;
+            vp_ptr1->domain_index[tofill] = i;
+            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V3;
+            vp_ptr1->len ++;
         }
         else
         {
@@ -365,7 +371,9 @@ fem2d_err fem2d_create_vp
                 "Returning with an error because this means triangulation is really bad!!!");
 
     /* Resize the length of vectors */
-    for (i = 0; i < ea->nr_nodes; i++)
+    for ( i = 0; 
+          (i < ea->nr_nodes) && (ea->vpatch_p[i].len != FEM2D_INIT_VPATCH_SIZE);
+          i++)
     {
         ea->vpatch_p[i].domain_index = realloc( ea->vpatch_p[i].domain_index, 
                                                 ea->vpatch_p[i].len * sizeof(matlib_index)); 
@@ -378,10 +386,214 @@ fem2d_err fem2d_create_vp
                         "%s", "Memory reallocation failed!", strerror(errno));
     }
 
+    for ( i = 0; (i < ea->nr_nodes); i++)
+    {
+        ea->vpatch_p[i].bvert_index = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+        err_check( (ea->vpatch_p[i].bvert_index == NULL), clean_up, 
+                        "%s", "Memory reallocation failed!", strerror(errno));
+    }
+    mcnt++;
+
+    matlib_index j, k, l, m, n, tmp, el1;
+    matlib_index next_vertex, other_vertex1, other_vertex2;
+    matlib_index list1_len, list2_len;
+    matlib_index *list1, *list2, *domain_index_tmp, *vert_index_tmp, *bvert_index_tmp;
+
+    bool found;
+    
+
+    for (i = 0; i < ea->nr_nodes; i++)
+    {
+        other_vertex1 = (ea->vpatch_p[i].vert_index[0] + 1) % FEM2D_NV;
+        other_vertex2 = (ea->vpatch_p[i].vert_index[0] + 2) % FEM2D_NV;
+        //ea->vpatch_p[i].bvert_index = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+        
+        ea->vpatch_p[i].bvert_index[0] = other_vertex1;
+        next_vertex = other_vertex2; 
+        debug_body( "vert_index: %d, other vertex1: %d, other vertex2: %d, next vertex: %d", 
+                    ea->vpatch_p[i].vert_index[0], other_vertex1, other_vertex2, next_vertex);
+        
+        debug_body("patch length: %d", ea->vpatch_p[i].len);
+        for (m = 1; m < ea->vpatch_p[i].len; m++ )
+        {
+            dptr = ea->elem_p + ea->vpatch_p[i].domain_index[m-1];
+            offset = ((matlib_index)dptr->vert_p[next_vertex] - (matlib_index)nptr0)/vsize;
+            debug_body("offset: %d", offset);
+            
+            vp_ptr1 = vp_ptr0 + offset;
+        
+            /* Find the common domain between: 
+             *   ea->vpatch_p[i].domain_index (length: ea->vpatch_p[i].len)
+             *   vp_ptr->domain_index (length: vp_ptr.len)
+             *
+             * Let us do a linear search.
+             *
+             * */ 
+            list1_len = ea->vpatch_p[i].len - m;
+            list2_len = vp_ptr1->len;
+            debug_body("comparing lists of length: %d and %d", list1_len, list2_len);
+            
+            list1 = ea->vpatch_p[i].domain_index + m;
+            list2 = vp_ptr1->domain_index;
+
+            found = false;
+            for (j = 0; j < list1_len; j++)
+            {
+                el1 = list1[j];
+                for (k = 0; k < list2_len; k++)
+                {
+                   if (el1 == list2[k])
+                   {
+                        found = true;
+                        debug_body( "Common domain found (j: %d, k: %d): %d",
+                                    j+m, k, list2[k]);
+                        break;
+                   }
+                }
+                if(found)
+                    break;
+            }
+
+            if(found)
+            {
+                ea->vpatch_p[i].bvert_index[m] = vp_ptr1->vert_index[k];
+                err_check( (vp_ptr1->vert_index[k] == ea->vpatch_p[i].vert_index[j+m]),
+                           clean_up, "%s", "Inconsisten vertex ordering found!");
+
+                if(j != 0)
+                {
+                    tmp = ea->vpatch_p[i].domain_index[m];
+                    ea->vpatch_p[i].domain_index[m] = ea->vpatch_p[i].domain_index[j+m];
+                    ea->vpatch_p[i].domain_index[j+m] = tmp;
+                    debug_body("tmp: %d", tmp);
+
+                    tmp = ea->vpatch_p[i].vert_index[m];
+                    ea->vpatch_p[i].vert_index[m] = ea->vpatch_p[i].vert_index[j+m];
+                    ea->vpatch_p[i].vert_index[j+m] = tmp;
+                    debug_body("tmp: %d", tmp);
+                }
+
+                other_vertex1 = (ea->vpatch_p[i].vert_index[m] + 1) % FEM2D_NV;
+                other_vertex2 = (ea->vpatch_p[i].vert_index[m] + 2) % FEM2D_NV;
+
+                next_vertex =   (ea->vpatch_p[i].bvert_index[m] == other_vertex1) 
+                              ? other_vertex2 : other_vertex1;
+                debug_body( "vertex index: %d, other vertex1: %d, "
+                            "other vertex2: %d, next vertex: %d", 
+                            ea->vpatch_p[i].vert_index[m], other_vertex1,
+                            other_vertex2, next_vertex);
+            }
+            else
+            {
+                debug_body("%s", "No common domain found (j: %d, k: %d)");
+                /* copy the list in new a lists in order to
+                 * continue in the backward direction
+                 * */ 
+                domain_index_tmp = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+                vert_index_tmp   = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+                bvert_index_tmp  = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+
+                domain_index_tmp[0] = ea->vpatch_p[i].domain_index[m-1];
+                vert_index_tmp[0]   = ea->vpatch_p[i].vert_index[m-1];
+                bvert_index_tmp[0]  = next_vertex;
+
+                for( n = 1; n < m; n++)
+                {
+                    domain_index_tmp[n] = ea->vpatch_p[i].domain_index[m-n-1];
+                    vert_index_tmp[n]   = ea->vpatch_p[i].vert_index[m-n-1];
+                    
+                    other_vertex1 = (vert_index_tmp[n] + 1) % FEM2D_NV;
+                    other_vertex2 = (vert_index_tmp[n] + 2) % FEM2D_NV;
+                    next_vertex =   (ea->vpatch_p[i].bvert_index[m-n-1] == other_vertex1) 
+                                  ? other_vertex2 : other_vertex1;
+
+                    bvert_index_tmp[n] = next_vertex;
+                }
+                
+                next_vertex =   (ea->vpatch_p[i].bvert_index[0] == other_vertex1) 
+                              ? other_vertex1 : other_vertex2;
+                for( n = m; n < ea->vpatch_p[i].len; n++)
+                {
+                    domain_index_tmp[n] = ea->vpatch_p[i].domain_index[n];
+                    vert_index_tmp[n]   = ea->vpatch_p[i].vert_index[n];
+                }
+
+                matlib_free(ea->vpatch_p[i].domain_index);
+                matlib_free(ea->vpatch_p[i].vert_index);
+                matlib_free(ea->vpatch_p[i].bvert_index);
+
+                ea->vpatch_p[i].domain_index = domain_index_tmp;
+                ea->vpatch_p[i].vert_index   = vert_index_tmp;
+                ea->vpatch_p[i].bvert_index  = bvert_index_tmp;
+                m = m-1;
+            }
+        }
+
+        m = ea->vpatch_p[i].len - 1;
+        other_vertex1 = (ea->vpatch_p[i].vert_index[m] + 1) % FEM2D_NV;
+        other_vertex2 = (ea->vpatch_p[i].vert_index[m] + 2) % FEM2D_NV;
+
+        next_vertex =   (ea->vpatch_p[i].bvert_index[m] == other_vertex1) 
+                      ? other_vertex2 : other_vertex1;
+        debug_body( "vert_index: %d, other vertex1: %d, "
+                    "other vertex2: %d, next vertex: %d", 
+                    ea->vpatch_p[i].vert_index[m], other_vertex1, 
+                    other_vertex2, next_vertex);
+
+        dptr = ea->elem_p + ea->vpatch_p[i].domain_index[m];
+        offset = ((matlib_index)dptr->vert_p[next_vertex] - (matlib_index)nptr0)/vsize;
+        debug_body("offset: %d", offset);
+        
+        vp_ptr1 = vp_ptr0 + offset;
+
+        list1_len = 1;
+        list2_len = vp_ptr1->len;
+        debug_body("comparing lists of length: %d and %d", list1_len, list2_len);
+        
+        list1 = ea->vpatch_p[i].domain_index;
+        list2 = vp_ptr1->domain_index;
+
+        found = false;
+        for (j = 0; j < list1_len; j++)
+        {
+            el1 = list1[j];
+            for (k = 0; k < list2_len; k++)
+            {
+               if (el1 == list2[k])
+               {
+                    found = true;
+                    debug_body("found common domain (j: %d, k: %d): %d", j+m, k, list2[k]);
+                    break;
+               }
+            }
+            if(found)
+                break;
+        }
+        if(found)
+        {
+            ea->vpatch_p[i].point_enum = FEM2D_INTERIOR;
+            debug_body("node: %d -> Interior point", i);
+        }
+        else
+        {
+            ea->vpatch_p[i].point_enum = FEM2D_BOUNDARY;
+            debug_body("node: %d -> Boundary point", i);
+        }
+    }
+
     debug_exit("Exit Status: %s", "SUCCESS");
     return FEM2D_SUCCESS;
 
 clean_up:
+    if (mcnt == 2)
+    {
+        for ( ; (vp_ptr < ea->vpatch_p) & (vp_ptr != NULL); 
+                vp_ptr--)
+        {
+            matlib_free(vp_ptr->bvert_index);
+        }
+        mcnt --;
+    }
     if (mcnt == 1)
     {
         for ( ; (vp_ptr < ea->vpatch_p) & (vp_ptr != NULL); 
@@ -395,6 +607,12 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
 }
+
+
+/* Find intersection of two sets integers. It is known that there is exactly one
+ * common element or none */
+
+
 
 void fem2d_free_ea(fem2d_ea ea)
 {
@@ -1076,6 +1294,7 @@ clean_up:
 
 } /* End of fem2d_LEprj */ 
 /*============================================================================*/
+
 matlib_real fem2d_LEnormL2
 (
     fem2d_ea  ea,
