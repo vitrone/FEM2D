@@ -72,9 +72,10 @@
 #define err_check(EXPR, LABEL, fmt,...)          \
         do { if((EXPR) && ENABLE_ERR_CHECKS){    \
             fprintf( stderr,                     \
-                     "%s:%s: Error: (%s)=TRUE:"  \
+                     "%s:%d:%s: Error: (%s)=TRUE:"\
                      fmt "\n",                   \
                      __FILE__,                   \
+                     __LINE__,                     \
                      __func__,                   \
                     #EXPR,                       \
                     __VA_ARGS__);                \

@@ -37,26 +37,6 @@ typedef enum
 
 } FEM2D_POINT_T;
 
-
-typedef struct
-{
-    matlib_index len; /* nr. of domains in the vertex patch */ 
-    FEM2D_POINT_T point_enum;
-    
-    /* array of domain indices arrange such that neighbhouring 
-     * domains are next to each other in the list 
-     * */ 
-    matlib_index* domain_index; 
-    matlib_index* vert_index; /* array of vertex order indices */ 
-
-    /* index of vertex on the boundary not shared by the next neighbhoiring
-     * domain in the vertex patch
-     * */ 
-    matlib_index* bvert_index; 
-
-} fem2d_vp; /* vertex patch */ 
-
-
 typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
@@ -67,6 +47,27 @@ typedef struct
 
 } fem2d_te; /* triangular element */
 
+/* Define the vertex patch for a given node: TBD
+ *
+ *
+ * */ 
+typedef struct
+{
+    matlib_index len; /* nr. of domains in the vertex patch */ 
+    FEM2D_POINT_T point_enum;
+    
+    /* array of domain pointers arranged such that neighbhouring 
+     * domains are next to each other in the list 
+     * */ 
+    fem2d_te**    domain_p;
+    matlib_index* vert_index; /* array of vertex order indices */ 
+
+    /* index of vertex on the boundary not shared by the next neighbhoiring
+     * domain in the vertex patch
+     * */ 
+    matlib_index* bvert_index; 
+
+} fem2d_vp; /* vertex patch */ 
 
 typedef struct
 {
@@ -96,6 +97,14 @@ extern const matlib_index FEM2D_INDEX_V3;
 extern const matlib_index FEM2D_NV;
 extern const matlib_index FEM2D_INIT_VPATCH_SIZE;
 extern const matlib_real MEMI[3][3];
+
+extern const matlib_index FEM2D_INDEX_V11;
+extern const matlib_index FEM2D_INDEX_V12;
+extern const matlib_index FEM2D_INDEX_V13;
+extern const matlib_index FEM2D_INDEX_V22;
+extern const matlib_index FEM2D_INDEX_V23;
+extern const matlib_index FEM2D_INDEX_V33;
+extern const matlib_index FEM2D_NR_COMBI;
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -120,6 +129,7 @@ fem2d_err fem2d_create_ea
 );
 
 fem2d_err fem2d_create_vp(fem2d_ea *ea);
+matlib_real fem2d_check_vp(fem2d_ea ea);
 
 void fem2d_free_ea(fem2d_ea ea);
 
@@ -181,7 +191,6 @@ fem2d_err fem2d_prj
     matlib_zv u_qnodes, /* values at the quadrature nodes */ 
     matlib_xm quadP,
     matlib_zv u_prj
-
 );
 
 fem2d_err fem2d_LEprj
@@ -202,5 +211,20 @@ matlib_complex fem2d_LEiprod
     fem2d_ea  ea,
     matlib_zv u_nodes, /* values at the nodes */ 
     matlib_zv v_nodes
+);
+
+fem2d_err fem2d_quadM
+(
+    matlib_xm  vphi,
+    matlib_xv  quadW,
+    matlib_xm* Q
+);
+
+matlib_real fem2d_check_quadM
+(
+    fem2d_cc     xi,
+    matlib_xv    quadW,
+    matlib_index m,
+    matlib_index n
 );
 #endif

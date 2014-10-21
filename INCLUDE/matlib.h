@@ -50,7 +50,7 @@
 
 #endif
 
-#define MATLIB_NAN FP_NAN
+#define MATLIB_NAN NAN
 
 /* Error handling */ 
 typedef enum

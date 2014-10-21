@@ -65,6 +65,24 @@ const matlib_real MEMI[3][3] = { {1.0/3.0,  1.0/6.0,  1.0/6.0},
                                  {1.0/6.0,  1.0/3.0,  1.0/6.0},
                                  {1.0/6.0,  1.0/6.0,  1.0/3.0}};
 
+/* 
+ * Combination of basis functions for mass-matrix
+ * (vphi1, vphi1) --> FEM2D_INDEX_V11
+ * (vphi1, vphi2) --> FEM2D_INDEX_V12
+ * (vphi1, vphi3) --> FEM2D_INDEX_V13
+ * (vphi2, vphi2) --> FEM2D_INDEX_V22
+ * (vphi2, vphi3) --> FEM2D_INDEX_V23
+ * (vphi3, vphi3) --> FEM2D_INDEX_V33
+ *
+ * */ 
+const matlib_index FEM2D_INDEX_V11 = 0;
+const matlib_index FEM2D_INDEX_V12 = 1;
+const matlib_index FEM2D_INDEX_V13 = 2;
+const matlib_index FEM2D_INDEX_V22 = 3;
+const matlib_index FEM2D_INDEX_V23 = 4;
+const matlib_index FEM2D_INDEX_V33 = 5;
+const matlib_index FEM2D_NR_COMBI  = 6;
+
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -292,21 +310,22 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                 strerror(errno), ea->nr_nodes);
     mcnt++;
 
-    errno = 0;
     fem2d_vp* vp_ptr = NULL; 
     for ( vp_ptr = ea->vpatch_p; 
           vp_ptr < ea->nr_nodes + ea->vpatch_p; 
           vp_ptr++)
     {
-            vp_ptr->domain_index = calloc(init_size, sizeof(matlib_index));
-            err_check( (vp_ptr->domain_index == NULL), clean_up, 
-                        "%s", "Memory allocation failed!", strerror(errno));
 
-            vp_ptr->vert_index   = calloc(init_size, sizeof(matlib_index));
-            err_check( (vp_ptr->vert_index == NULL), clean_up, 
-                        "%s", "Memory allocation failed!", strerror(errno));
+        errno = 0;
+        vp_ptr->domain_p = calloc(init_size, sizeof(fem2d_te*));
+        err_check( (vp_ptr->domain_p == NULL), clean_up, 
+                    "%s", "Memory allocation failed!", strerror(errno));
+        errno = 0;
+        vp_ptr->vert_index   = calloc(init_size, sizeof(matlib_index));
+        err_check( (vp_ptr->vert_index == NULL), clean_up, 
+                    "%s", "Memory allocation failed!", strerror(errno));
 
-            vp_ptr->len = 0;
+        vp_ptr->len = 0;
     }
     debug_body("%s", "Memory allocated!");
     
@@ -327,9 +346,10 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            vp_ptr1->domain_index[tofill] = i;
-            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V1;
+            vp_ptr1->domain_p[tofill] = dptr;
+            vp_ptr1->vert_index[tofill] = FEM2D_INDEX_V1;
             vp_ptr1->len ++;
+            debug_body("i: %d, di: %d", i, dptr->domain_index);
         }
         else
         {
@@ -342,9 +362,10 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            vp_ptr1->domain_index[tofill] = i;
-            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V2;
+            vp_ptr1->domain_p[tofill]   = dptr;
+            vp_ptr1->vert_index[tofill] = FEM2D_INDEX_V2;
             vp_ptr1->len ++;
+            debug_body("i: %d, di: %d", i, dptr->domain_index);
         }
         else
         {
@@ -356,9 +377,10 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         tofill  = vp_ptr1->len;
         if (tofill <= init_size )
         {
-            vp_ptr1->domain_index[tofill] = i;
-            vp_ptr1->vert_index[tofill]   = FEM2D_INDEX_V3;
+            vp_ptr1->domain_p[tofill]   = dptr;
+            vp_ptr1->vert_index[tofill] = FEM2D_INDEX_V3;
             vp_ptr1->len ++;
+            debug_body("i: %d, di: %d", i, dptr->domain_index);
         }
         else
         {
@@ -372,14 +394,16 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
 
     /* Resize the length of vectors */
     for ( i = 0; 
-          (i < ea->nr_nodes) && (ea->vpatch_p[i].len != FEM2D_INIT_VPATCH_SIZE);
+          (i < ea->nr_nodes) && (ea->vpatch_p[i].len != init_size);
           i++)
     {
-        ea->vpatch_p[i].domain_index = realloc( ea->vpatch_p[i].domain_index, 
-                                                ea->vpatch_p[i].len * sizeof(matlib_index)); 
-        err_check( (ea->vpatch_p[i].domain_index == NULL), clean_up, 
+        errno = 0;
+        ea->vpatch_p[i].domain_p = realloc( ea->vpatch_p[i].domain_p, 
+                                            ea->vpatch_p[i].len * sizeof(fem2d_te*)); 
+        err_check( (ea->vpatch_p[i].domain_p == NULL), clean_up, 
                         "%s", "Memory reallocation failed!", strerror(errno));
 
+        errno = 0;
         ea->vpatch_p[i].vert_index = realloc( ea->vpatch_p[i].vert_index, 
                                               ea->vpatch_p[i].len * sizeof(matlib_index)); 
         err_check( (ea->vpatch_p[i].vert_index == NULL), clean_up, 
@@ -388,16 +412,20 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
 
     for ( i = 0; (i < ea->nr_nodes); i++)
     {
+        errno = 0;
         ea->vpatch_p[i].bvert_index = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
         err_check( (ea->vpatch_p[i].bvert_index == NULL), clean_up, 
                         "%s", "Memory reallocation failed!", strerror(errno));
     }
     mcnt++;
 
-    matlib_index j, k, l, m, n, tmp, el1;
+    matlib_index j, k, l, m, n, tmp;
     matlib_index next_vertex, other_vertex1, other_vertex2;
     matlib_index list1_len, list2_len;
-    matlib_index *list1, *list2, *domain_index_tmp, *vert_index_tmp, *bvert_index_tmp;
+    matlib_index *vert_index_tmp, *bvert_index_tmp;
+    fem2d_te **dlist1, **dlist2, **domain_p_tmp;
+
+    fem2d_te *dptr_tmp, *del1;
 
     bool found;
     
@@ -406,7 +434,6 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
     {
         other_vertex1 = (ea->vpatch_p[i].vert_index[0] + 1) % FEM2D_NV;
         other_vertex2 = (ea->vpatch_p[i].vert_index[0] + 2) % FEM2D_NV;
-        //ea->vpatch_p[i].bvert_index = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
         
         ea->vpatch_p[i].bvert_index[0] = other_vertex1;
         next_vertex = other_vertex2; 
@@ -416,7 +443,7 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         debug_body("patch length: %d", ea->vpatch_p[i].len);
         for (m = 1; m < ea->vpatch_p[i].len; m++ )
         {
-            dptr = ea->elem_p + ea->vpatch_p[i].domain_index[m-1];
+            dptr = ea->vpatch_p[i].domain_p[m-1];
             offset = ((matlib_index)dptr->vert_p[next_vertex] - (matlib_index)nptr0)/vsize;
             debug_body("offset: %d", offset);
             
@@ -433,20 +460,20 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
             list2_len = vp_ptr1->len;
             debug_body("comparing lists of length: %d and %d", list1_len, list2_len);
             
-            list1 = ea->vpatch_p[i].domain_index + m;
-            list2 = vp_ptr1->domain_index;
+            dlist1 = ea->vpatch_p[i].domain_p + m;
+            dlist2 = vp_ptr1->domain_p;
 
             found = false;
             for (j = 0; j < list1_len; j++)
             {
-                el1 = list1[j];
+                del1 = dlist1[j];
                 for (k = 0; k < list2_len; k++)
                 {
-                   if (el1 == list2[k])
+                   if (del1 == dlist2[k])
                    {
                         found = true;
-                        debug_body( "Common domain found (j: %d, k: %d): %d",
-                                    j+m, k, list2[k]);
+                        debug_body( "Common domain found (j: %d, k: %d): %d, %d",
+                                    j+m, k, dlist2[k]->domain_index );
                         break;
                    }
                 }
@@ -462,10 +489,10 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
 
                 if(j != 0)
                 {
-                    tmp = ea->vpatch_p[i].domain_index[m];
-                    ea->vpatch_p[i].domain_index[m] = ea->vpatch_p[i].domain_index[j+m];
-                    ea->vpatch_p[i].domain_index[j+m] = tmp;
-                    debug_body("tmp: %d", tmp);
+                    dptr_tmp = ea->vpatch_p[i].domain_p[m];
+                    ea->vpatch_p[i].domain_p[m] = ea->vpatch_p[i].domain_p[j+m];
+                    ea->vpatch_p[i].domain_p[j+m] = dptr_tmp;
+                    debug_body("dptr_tmp: %p", dptr_tmp);
 
                     tmp = ea->vpatch_p[i].vert_index[m];
                     ea->vpatch_p[i].vert_index[m] = ea->vpatch_p[i].vert_index[j+m];
@@ -489,18 +516,18 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                 /* copy the list in new a lists in order to
                  * continue in the backward direction
                  * */ 
-                domain_index_tmp = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
-                vert_index_tmp   = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
-                bvert_index_tmp  = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+                domain_p_tmp    = calloc(ea->vpatch_p[i].len, sizeof(fem2d_te*));
+                vert_index_tmp  = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+                bvert_index_tmp = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
 
-                domain_index_tmp[0] = ea->vpatch_p[i].domain_index[m-1];
-                vert_index_tmp[0]   = ea->vpatch_p[i].vert_index[m-1];
-                bvert_index_tmp[0]  = next_vertex;
+                domain_p_tmp[0]    = ea->vpatch_p[i].domain_p[m-1];
+                vert_index_tmp[0]  = ea->vpatch_p[i].vert_index[m-1];
+                bvert_index_tmp[0] = next_vertex;
 
                 for( n = 1; n < m; n++)
                 {
-                    domain_index_tmp[n] = ea->vpatch_p[i].domain_index[m-n-1];
-                    vert_index_tmp[n]   = ea->vpatch_p[i].vert_index[m-n-1];
+                    domain_p_tmp[n]   = ea->vpatch_p[i].domain_p[m-n-1];
+                    vert_index_tmp[n] = ea->vpatch_p[i].vert_index[m-n-1];
                     
                     other_vertex1 = (vert_index_tmp[n] + 1) % FEM2D_NV;
                     other_vertex2 = (vert_index_tmp[n] + 2) % FEM2D_NV;
@@ -514,15 +541,15 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                               ? other_vertex1 : other_vertex2;
                 for( n = m; n < ea->vpatch_p[i].len; n++)
                 {
-                    domain_index_tmp[n] = ea->vpatch_p[i].domain_index[n];
-                    vert_index_tmp[n]   = ea->vpatch_p[i].vert_index[n];
+                    domain_p_tmp[n]   = ea->vpatch_p[i].domain_p[n];
+                    vert_index_tmp[n] = ea->vpatch_p[i].vert_index[n];
                 }
 
-                matlib_free(ea->vpatch_p[i].domain_index);
+                matlib_free(ea->vpatch_p[i].domain_p);
                 matlib_free(ea->vpatch_p[i].vert_index);
                 matlib_free(ea->vpatch_p[i].bvert_index);
 
-                ea->vpatch_p[i].domain_index = domain_index_tmp;
+                ea->vpatch_p[i].domain_p     = domain_p_tmp;
                 ea->vpatch_p[i].vert_index   = vert_index_tmp;
                 ea->vpatch_p[i].bvert_index  = bvert_index_tmp;
                 m = m-1;
@@ -540,7 +567,7 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                     ea->vpatch_p[i].vert_index[m], other_vertex1, 
                     other_vertex2, next_vertex);
 
-        dptr = ea->elem_p + ea->vpatch_p[i].domain_index[m];
+        dptr = ea->vpatch_p[i].domain_p[m];
         offset = ((matlib_index)dptr->vert_p[next_vertex] - (matlib_index)nptr0)/vsize;
         debug_body("offset: %d", offset);
         
@@ -550,19 +577,20 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         list2_len = vp_ptr1->len;
         debug_body("comparing lists of length: %d and %d", list1_len, list2_len);
         
-        list1 = ea->vpatch_p[i].domain_index;
-        list2 = vp_ptr1->domain_index;
+        dlist1 = ea->vpatch_p[i].domain_p;
+        dlist2 = vp_ptr1->domain_p;
 
         found = false;
         for (j = 0; j < list1_len; j++)
         {
-            el1 = list1[j];
+            del1 = dlist1[j];
             for (k = 0; k < list2_len; k++)
             {
-               if (el1 == list2[k])
+               if (del1 == dlist2[k])
                {
                     found = true;
-                    debug_body("found common domain (j: %d, k: %d): %d", j+m, k, list2[k]);
+                    debug_body( "found common domain (j: %d, k: %d): %d",
+                                j+m, k, dlist2[k]->domain_index);
                     break;
                }
             }
@@ -599,7 +627,7 @@ clean_up:
         for ( ; (vp_ptr < ea->vpatch_p) & (vp_ptr != NULL); 
                 vp_ptr--)
         {
-            matlib_free(vp_ptr->domain_index);
+            matlib_free(vp_ptr->domain_p);
             matlib_free(vp_ptr->vert_index);
         }
         matlib_free(ea->vpatch_p);
@@ -607,11 +635,77 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
 }
+/*============================================================================*/
 
+matlib_real fem2d_check_vp(fem2d_ea ea)
+{
+    matlib_real *edge_mid_point = NULL;
+    matlib_real *mptr, *first_edge, *last_edge;
+    matlib_real *v1, *v2, *v3;
 
-/* Find intersection of two sets integers. It is known that there is exactly one
- * common element or none */
+    fem2d_te *dptr;
+    fem2d_vp *vp_ptr;
+    matlib_index i, j, mlength;
 
+    /* per triangular domain in a vertex patch,
+     * 
+     * The third segment is more like a boundary of the vertex patch. 
+     * */  
+    matlib_index nr_edges = 2; 
+
+    matlib_real err = 0;
+    matlib_real err1;
+    for ( vp_ptr = ea.vpatch_p, i = 0; 
+          i < ea.nr_nodes; vp_ptr++, i++)
+    {
+        mlength = FEM2D_DIM * nr_edges * vp_ptr->len;
+        errno = 0;
+        edge_mid_point = calloc(mlength, sizeof(matlib_real));
+
+        mptr = edge_mid_point; 
+        
+        for ( j = 0; j < vp_ptr->len; j++)
+        {
+            dptr = vp_ptr->domain_p[j];
+            v1 = *(dptr->vert_p + vp_ptr->vert_index[j]);
+            v2 = *(dptr->vert_p + vp_ptr->bvert_index[j]);
+            v3 = *(dptr->vert_p + 
+                 (FEM2D_NV - vp_ptr->bvert_index[j] - vp_ptr->vert_index[j]));
+            
+            mptr[FEM2D_INDEX_DIM1] = 0.5 * (v1[FEM2D_INDEX_DIM1] + v2[FEM2D_INDEX_DIM1]);
+            mptr[FEM2D_INDEX_DIM2] = 0.5 * (v1[FEM2D_INDEX_DIM2] + v2[FEM2D_INDEX_DIM2]);
+
+            mptr += FEM2D_DIM;
+            mptr[FEM2D_INDEX_DIM1] = 0.5 * (v1[FEM2D_INDEX_DIM1] + v3[FEM2D_INDEX_DIM1]);
+            mptr[FEM2D_INDEX_DIM2] = 0.5 * (v1[FEM2D_INDEX_DIM2] + v3[FEM2D_INDEX_DIM2]);
+            mptr += FEM2D_DIM;
+        }
+        err1 = 0;
+        mptr = edge_mid_point;
+        for ( j = 0; j < vp_ptr->len-1; j++)
+        {
+            mptr += FEM2D_DIM;
+            err1 += (   fabs(mptr[FEM2D_INDEX_DIM1] - mptr[FEM2D_DIM + FEM2D_INDEX_DIM1]) 
+                      + fabs(mptr[FEM2D_INDEX_DIM2] - mptr[FEM2D_DIM + FEM2D_INDEX_DIM2]));
+            mptr += FEM2D_DIM;
+        }
+        
+        if(vp_ptr->point_enum == FEM2D_INTERIOR)
+        {
+            first_edge = edge_mid_point;
+            last_edge  =  edge_mid_point + mlength - FEM2D_DIM;
+
+            err1 += (   fabs(first_edge[FEM2D_INDEX_DIM1] - last_edge[FEM2D_INDEX_DIM1]) 
+                      + fabs(first_edge[FEM2D_INDEX_DIM2] - last_edge[FEM2D_INDEX_DIM2]));
+        }
+        debug_body( "Node: %d, err: %0.16f", i, err1);
+        matlib_free(edge_mid_point);
+    }
+    err += err1; 
+
+    return err;
+}
+/*============================================================================*/
 
 
 void fem2d_free_ea(fem2d_ea ea)
@@ -631,8 +725,9 @@ void fem2d_free_ea(fem2d_ea ea)
           (vp_ptr < ea.vpatch_p + ea.nr_nodes) & (vp_ptr != NULL); 
           vp_ptr++)
     {
-        matlib_free(vp_ptr->domain_index);
+        matlib_free(vp_ptr->domain_p);
         matlib_free(vp_ptr->vert_index);
+        matlib_free(vp_ptr->bvert_index);
     }
     matlib_free(ea.vpatch_p);
 
@@ -1450,3 +1545,250 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return MATLIB_NAN;
 }
+/*============================================================================*/
+fem2d_err fem2d_quadM
+(
+    matlib_xm  vphi,
+    matlib_xv  quadW,
+    matlib_xm* Q
+)
+{
+    debug_enter( "nr of quadrature points: %d", quadW.len);
+    
+    err_check(    (vphi.elem_p  == NULL)    
+               || (quadW.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (vphi.lenc != quadW.len) 
+               || (vphi.lenr != FEM2D_NV), clean_up, 
+               "Dimension mis-match (vphi: %d-by-%d, quadW: %d)!",
+               vphi.lenc, vphi.lenr, quadW.len);
+
+    matlib_index mcnt = 0;
+    fem2d_err error = matlib_create_xm( FEM2D_NR_COMBI, quadW.len, Q, 
+                                        MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation for quadrature matrix failed!");
+    mcnt++;
+    matlib_index i;
+    matlib_index stride = quadW.len;
+
+    for (i = 0; i < quadW.len; i++)
+    {
+        Q->elem_p[FEM2D_INDEX_V11 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V1 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V1 * stride]
+                                                  * quadW.elem_p[i];
+
+        Q->elem_p[FEM2D_INDEX_V12 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V1 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V2 * stride]
+                                                  * quadW.elem_p[i];
+        
+        Q->elem_p[FEM2D_INDEX_V13 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V1 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V3 * stride]
+                                                  * quadW.elem_p[i];
+
+        Q->elem_p[FEM2D_INDEX_V22 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V2 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V2 * stride]
+                                                  * quadW.elem_p[i];
+
+        Q->elem_p[FEM2D_INDEX_V23 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V2 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V3 * stride]
+                                                  * quadW.elem_p[i];
+    
+        Q->elem_p[FEM2D_INDEX_V33 * stride + i] =   vphi.elem_p[i + FEM2D_INDEX_V3 * stride] 
+                                                  * vphi.elem_p[i + FEM2D_INDEX_V3 * stride]
+                                                  * quadW.elem_p[i];
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    
+    if (mcnt == 1)
+        matlib_free(Q->elem_p);
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+}
+/*============================================================================*/
+
+matlib_real fem2d_poly_symint
+(
+    matlib_index m,
+    matlib_index n
+)
+/* 
+ * value of: integral_{K_t} xi1^m * xi2^n dxi1 dxi2
+ * */ 
+{
+
+    matlib_int minusone_raised2m = -1;
+    matlib_int minusone_raised2n = -1;
+
+    if((m % 2) == 0)
+    {
+        minusone_raised2m = 1;
+    }
+
+    if((n % 2) == 0)
+    {
+        minusone_raised2n = 1;
+    }
+
+    matlib_real integral = (   minusone_raised2m/((n + 1.0) * (m + n + 2.0)) 
+                             + minusone_raised2n/((m + 1.0) * (m + n + 2.0))
+                             + minusone_raised2m * minusone_raised2n/((m + 1.0) * (n + 1.0)));
+    return integral;
+}
+
+matlib_real fem2d_check_quadM
+(
+    fem2d_cc     xi,
+    matlib_xv    quadW,
+    matlib_index m,
+    matlib_index n
+)
+/* 
+ * phi = xi1^m * xi2^n
+ *
+ * q1 ->   (xi1^m*xi1^2*xi2^n)/4 + (xi1^m*xi2^n*xi2^2)/4 + (xi1*xi1^m*xi2*xi2^n)/2 
+ * q2 -> - (xi1*xi1^m*xi2^n)/4   - (xi1^m*xi2*xi2^n)/4   - (xi1^m*xi1^2*xi2^n)/4   - (xi1*xi1^m*xi2*xi2^n)/4
+ * q3 -> - (xi1*xi1^m*xi2^n)/4   - (xi1^m*xi2*xi2^n)/4   - (xi1^m*xi2^n*xi2^2)/4   - (xi1*xi1^m*xi2*xi2^n)/4
+ *
+ * q4 ->   (xi1^m*xi2^n)/4       + (xi1*xi1^m*xi2^n)/2   + (xi1^m*xi1^2*xi2^n)/4 
+ * q5 ->   (xi1^m*xi2^n)/4       + (xi1*xi1^m*xi2^n)/4   + (xi1^m*xi2*xi2^n)/4     + (xi1*xi1^m*xi2*xi2^n)/4
+ *
+ * q6 ->   (xi1^m*xi2^n)/4       + (xi1^m*xi2*xi2^n)/2   + (xi1^m*xi2^n*xi2^2)/4
+ *
+ * */ 
+{
+    debug_enter("m: %d, n: %d, nr of quad points: %d", m, n, xi.len);
+
+    matlib_real q1, q2, q3, q4, q5, q6;
+
+    q1 =   fem2d_poly_symint( m + 2, n + 0)/4.0
+         + fem2d_poly_symint( m + 0, n + 2)/4.0
+         + fem2d_poly_symint( m + 1, n + 1)/2.0;
+    debug_body("q1: %0.16f", q1);
+
+    q2 = - fem2d_poly_symint( m + 1, n + 0)/4.0
+         - fem2d_poly_symint( m + 0, n + 1)/4.0
+         - fem2d_poly_symint( m + 2, n + 0)/4.0
+         - fem2d_poly_symint( m + 1, n + 1)/4.0;
+    debug_body("q2: %0.16f", q2);
+
+    q3 = - fem2d_poly_symint( m + 1, n + 0)/4.0
+         - fem2d_poly_symint( m + 0, n + 1)/4.0
+         - fem2d_poly_symint( m + 0, n + 2)/4.0
+         - fem2d_poly_symint( m + 1, n + 1)/4.0;
+    debug_body("q3: %0.16f", q3);
+
+    q4 =   fem2d_poly_symint( m + 0, n + 0)/4.0
+         + fem2d_poly_symint( m + 1, n + 0)/2.0
+         + fem2d_poly_symint( m + 2, n + 0)/4.0;
+    debug_body("q4: %0.16f", q4);
+
+    q5 =   fem2d_poly_symint( m + 0, n + 0)/4.0
+         + fem2d_poly_symint( m + 1, n + 0)/4.0
+         + fem2d_poly_symint( m + 0, n + 1)/4.0
+         + fem2d_poly_symint( m + 1, n + 1)/4.0;
+    debug_body("q5: %0.16f", q5);
+
+    q6 =   fem2d_poly_symint( m + 0, n + 0)/4.0
+         + fem2d_poly_symint( m + 0, n + 1)/2.0
+         + fem2d_poly_symint( m + 0, n + 2)/4.0;
+    debug_body("q6: %0.16f", q6);
+
+    matlib_index mcnt = 0;
+    fem2d_err error;
+    matlib_xv q, phi;
+    error = matlib_create_xv( 6, &q, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation failed!");
+    mcnt++; /* 1 */ 
+    error = matlib_create_xv( xi.len, &phi, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation failed!");
+    mcnt++; /* 2 */ 
+
+    matlib_real *xiptr;
+    matlib_real *phi_ptr = phi.elem_p;
+    for ( xiptr = xi.elem_p; 
+          xiptr < xi.elem_p + FEM2D_DIM * xi.len; 
+          xiptr += FEM2D_DIM, phi_ptr++)
+    {
+        *phi_ptr = pow(xiptr[FEM2D_INDEX_DIM1], m) * pow(xiptr[FEM2D_INDEX_DIM2], n);
+    }
+
+    matlib_xm vphi, Q;
+    error = fem2d_refbasis(xi, &vphi);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to compute the values of reference basis functions!");
+
+    mcnt++; /* 3 */
+
+    error = fem2d_quadM(vphi, quadW, &Q);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to compute the quadrature matrix!");
+    mcnt++; /* 4 */ 
+
+    error = matlib_xgemv( 1.0, Q, phi, 0.0, q);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Matrix product failed!");
+
+
+    DEBUG_PRINT_XV(q, "%s:", "Gauss quadrature");
+    matlib_real err = 0;
+    err += ((q1 - q.elem_p[FEM2D_INDEX_V11]) * (q1 - q.elem_p[FEM2D_INDEX_V11]));
+    err += ((q2 - q.elem_p[FEM2D_INDEX_V12]) * (q2 - q.elem_p[FEM2D_INDEX_V12]));
+    err += ((q3 - q.elem_p[FEM2D_INDEX_V13]) * (q3 - q.elem_p[FEM2D_INDEX_V13]));
+    err += ((q4 - q.elem_p[FEM2D_INDEX_V22]) * (q4 - q.elem_p[FEM2D_INDEX_V22]));
+    err += ((q5 - q.elem_p[FEM2D_INDEX_V23]) * (q5 - q.elem_p[FEM2D_INDEX_V23]));
+    err += ((q6 - q.elem_p[FEM2D_INDEX_V33]) * (q6 - q.elem_p[FEM2D_INDEX_V33]));
+
+    matlib_real norm =   (q1 * q1) 
+                       + (q2 * q2)
+                       + (q3 * q3)
+                       + (q4 * q4)
+                       + (q5 * q5)
+                       + (q6 * q6);
+
+    matlib_real e_relative = sqrt(err/norm);
+    debug_body("Relative error: %0.16f", e_relative);
+    debug_exit("Exit Status: %s", "SUCCESS" );
+
+    matlib_free(Q.elem_p);
+    matlib_free(vphi.elem_p);
+    matlib_free(phi.elem_p);
+    matlib_free(q.elem_p);
+    return e_relative;
+
+clean_up:
+    
+    if (mcnt == 4)
+    {
+        matlib_free(Q.elem_p);
+        mcnt--;
+    }
+    if (mcnt == 3)
+    {
+        matlib_free(vphi.elem_p);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(phi.elem_p);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(q.elem_p);
+    }
+
+    debug_body("Relative error: %0.16f", MATLIB_NAN);
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+}
+

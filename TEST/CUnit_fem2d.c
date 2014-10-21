@@ -605,7 +605,7 @@ void test_create_ea(void)
         printf("%d", vp_ptr->len);
         for (j = 0; j< vp_ptr->len; j++)
         {
-            printf("%d ", vp_ptr->domain_index[j]);
+            printf("%d ", vp_ptr->domain_p[j]->domain_index);
         }
         printf("\n");
         for (j = 0; j< vp_ptr->len; j++)
@@ -613,10 +613,29 @@ void test_create_ea(void)
             printf("%d ", vp_ptr->vert_index[j]);
         }
         printf("\n");
+        for (j = 0; j< vp_ptr->len; j++)
+        {
+            printf("%d ", vp_ptr->bvert_index[j]);
+        }
+        printf("\n");
         printf("\n");
     }
     fem2d_free_ea(ea);
+}
 
+void test_create_vp(void)
+{
+    fem2d_ea ea;
+    fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    fem2d_create_vp(&ea);
+
+    matlib_real err = 0;
+
+    err = fem2d_check_vp(ea);
+    debug_body( "Error: %0.16f", err);
+    CU_ASSERT_TRUE(err < TOL);
+
+    fem2d_free_ea(ea);
 }
 
 void test_create_ea1(void)
@@ -1582,9 +1601,6 @@ clean_up:
     return FEM2D_FAILURE;
 
 }
-
-
-
 #endif 
 void test_interp1(void)
 {
@@ -1613,6 +1629,28 @@ void test_prj(void)
     CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
 
 }
+
+void test_quadM(void)
+{
+    matlib_index m = 1;
+    matlib_index n = 1;
+
+    /* quadW: quadrature weights */ 
+    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+
+    float e_relative = fem2d_check_quadM(xi, quadW, m, n);
+    debug_exit("Relative error: %0.16f", e_relative);
+    if(isnan(e_relative))
+    {
+        CU_ASSERT_TRUE(false);
+    }
+    else
+    {
+        CU_ASSERT_TRUE(e_relative<TOL);
+    }
+}
+
+
 /*============================================================================*/
 
 int main()
@@ -1628,19 +1666,21 @@ int main()
     /* Create a test array */
     CU_TestInfo test_array[] = 
     {
-        { "Create element array"               , test_create_ea },
-        { "Create element array1"              , test_create_ea1},
-        { "Create element array2"              , test_create_ea2},
-        { "Create index array"              , test_create_ia},
-        { "Centroid"                           , test_centroid  },
-        { "Centroid1"                          , test_centroid1 },
-        { "Ref. basis"                         , test_refbasis  },
-        {"Ref to mesh"                         , test_ref2mesh  },
-        { "Interpolation on trianglar elements", test_interp    },
-        { "Interpolation on trianglar elements1", test_interp1    },
-        { "L2 norm", test_normL2    },
-        { "Inner product", test_iprod    },
-        { "projection ", test_prj    },
+        //{ "Create vertex patch"              , test_create_vp},
+        //{ "Create element array"               , test_create_ea },
+        //{ "Create element array1"              , test_create_ea1},
+        //{ "Create element array2"              , test_create_ea2},
+        //{ "Create index array"              , test_create_ia},
+        //{ "Centroid"                           , test_centroid  },
+        //{ "Centroid1"                          , test_centroid1 },
+        //{ "Ref. basis"                         , test_refbasis  },
+        //{"Ref to mesh"                         , test_ref2mesh  },
+        //{ "Interpolation on trianglar elements", test_interp    },
+        //{ "Interpolation on trianglar elements1", test_interp1    },
+        //{ "L2 norm", test_normL2    },
+        //{ "Inner product", test_iprod    },
+        //{ "projection ", test_prj    },
+        { "quadM ", test_quadM    },
         CU_TEST_INFO_NULL,
     };
 
