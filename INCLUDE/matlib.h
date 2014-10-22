@@ -50,6 +50,7 @@
 
 #endif
 
+#define MATLIB_TOL (1e-9)
 #define MATLIB_NAN NAN
 
 /* Error handling */ 
@@ -141,7 +142,7 @@ typedef struct
 } matlib_zv;
 
 /* The operation field is to tell if the meaningful entries belong to the current
- * matrix or the transposed version of it. An actual taranspose operation is
+ * matrix or the transposed version of it. An actual transpose operation is
  * carried out only if strictly needed.
  * */ 
 typedef struct

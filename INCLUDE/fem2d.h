@@ -41,6 +41,7 @@ typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
     matlib_index  domain_index;
+    matlib_index  pos_vpatch;
     matlib_real   jacob;
     matlib_real*  ijmat;
     matlib_real*  jmat;
@@ -61,7 +62,7 @@ typedef struct
      * */ 
     fem2d_te**    domain_p;
     matlib_index* vert_index; /* array of vertex order indices */ 
-
+    matlib_int*   node_order;
     /* index of vertex on the boundary not shared by the next neighbhoiring
      * domain in the vertex patch
      * */ 
@@ -71,8 +72,8 @@ typedef struct
 
 typedef struct
 {
-    matlib_real* nbase; /* node base address */ 
-    matlib_index len; /* nr of domains */ 
+    matlib_real* nbase;    /* node base address */ 
+    matlib_index len;      /* nr of domains */ 
     matlib_index nr_nodes; /* nr of nodes */ 
     fem2d_te*    elem_p;
     fem2d_vp*    vpatch_p;
@@ -129,6 +130,14 @@ fem2d_err fem2d_create_ea
 );
 
 fem2d_err fem2d_create_vp(fem2d_ea *ea);
+
+fem2d_err fem2d_sort_node_index
+(
+    matlib_index  zeroth,
+    matlib_index* ilist,
+    matlib_index  ilen,
+    matlib_int*   iorder
+);
 matlib_real fem2d_check_vp(fem2d_ea ea);
 
 void fem2d_free_ea(fem2d_ea ea);
@@ -227,4 +236,7 @@ matlib_real fem2d_check_quadM
     matlib_index m,
     matlib_index n
 );
+
+matlib_index fem2d_get_nnz(fem2d_ea ea);
+
 #endif

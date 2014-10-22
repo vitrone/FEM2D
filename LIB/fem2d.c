@@ -215,15 +215,19 @@ fem2d_err fem2d_create_ea
 
     matlib_real det = 0;
     matlib_real *vert1, *vert2, *vert3;
+    matlib_index index1, index2, index3, pos1, pos2, pos3;
 
     for ( i = 0, di = 0;
           i < FEM2D_NV * nr_domains; 
           i += FEM2D_NV, di++, dptr++)
     {
+        dptr->vert_p = NULL;
+        dptr->jmat   = NULL;
+        dptr->ijmat  = NULL;
         dptr->domain_index = di;
         errno = 0;
         dptr->vert_p = calloc( FEM2D_NV, sizeof(matlib_real*));
-        err_check( (ea->elem_p == NULL), clean_up, 
+        err_check( (dptr->vert_p == NULL), clean_up, 
                    "%s: memory allocation for vertex pointers failed (domain nr: %d)!", 
                    strerror(errno), dptr->domain_index);
 
@@ -239,9 +243,37 @@ fem2d_err fem2d_create_ea
                    "%s: memory allocation for inverse Jacobian matrix failed (domain nr: %d)!", 
                    strerror(errno), dptr->domain_index);
 
-        vert1 = nodes.elem_p + FEM2D_DIM * ia[i + FEM2D_INDEX_V1];
-        vert2 = nodes.elem_p + FEM2D_DIM * ia[i + FEM2D_INDEX_V2];
-        vert3 = nodes.elem_p + FEM2D_DIM * ia[i + FEM2D_INDEX_V3];
+        /* Vertex indices are sorted in the increasing order
+         * */ 
+        index1 = ia[i + FEM2D_INDEX_V1];
+        pos1   = FEM2D_INDEX_V1;
+        if (index1 > ia[i + FEM2D_INDEX_V2])
+        {
+            index1 = ia[i + FEM2D_INDEX_V2];
+            pos1 = FEM2D_INDEX_V2;
+        }
+        if (index1 > ia[i + FEM2D_INDEX_V3])
+        {
+            index1 = ia[i + FEM2D_INDEX_V3];
+            pos1 = FEM2D_INDEX_V3;
+        }
+        pos2   = ((pos1 + 1) % FEM2D_NV);
+        pos3   = ((pos1 + 2) % FEM2D_NV);
+        index2 = ia[i + pos2];
+        if (index2 > ia[i + pos3])
+        {
+            index2 = ia[i + pos3];
+            index3 = ia[i + pos2];
+        }
+        else
+        {
+            index3 = ia[i + pos3];
+        }
+        debug_body("indices: %d, %d, %d", index1, index2, index3);
+        debug_body("pos: %d, %d, %d", pos1, pos2, pos3);
+        vert1 = nodes.elem_p + FEM2D_DIM * index1;
+        vert2 = nodes.elem_p + FEM2D_DIM * index2;
+        vert3 = nodes.elem_p + FEM2D_DIM * index3;
 
         (dptr->vert_p)[FEM2D_INDEX_V1] = vert1;
         (dptr->vert_p)[FEM2D_INDEX_V2] = vert2;
@@ -252,14 +284,14 @@ fem2d_err fem2d_create_ea
         dptr->jmat[FEM2D_INDEX_J21] = 0.5*(vert2[FEM2D_INDEX_DIM2]-vert1[FEM2D_INDEX_DIM2]); 
         dptr->jmat[FEM2D_INDEX_J22] = 0.5*(vert3[FEM2D_INDEX_DIM2]-vert1[FEM2D_INDEX_DIM2]);
         
-        det =   dptr->jmat[FEM2D_INDEX_J11] * dptr->jmat[FEM2D_INDEX_J22] 
-              - dptr->jmat[FEM2D_INDEX_J12] * dptr->jmat[FEM2D_INDEX_J21];
+        det = fabs(   dptr->jmat[FEM2D_INDEX_J11] * dptr->jmat[FEM2D_INDEX_J22] 
+                    - dptr->jmat[FEM2D_INDEX_J12] * dptr->jmat[FEM2D_INDEX_J21]);
         
-        err_check( (det <= 0), clean_up, 
-                   "Zero or negative determinant encountered"
+        err_check( (det < MATLIB_TOL), clean_up, 
+                   "Zero determinant encountered"
                    "(domain: %d, det = %0.16f)!", 
                     dptr->domain_index, det);
-        dptr->jacob = fabs(det);
+        dptr->jacob = det;
         /* 
          * M = [ a, b;                   
          *       c, d ];
@@ -279,14 +311,17 @@ fem2d_err fem2d_create_ea
 clean_up:
     if (mcnt>0)
     {
-        for ( ; (i >= 0) && (dptr != NULL); 
-                i -= FEM2D_NV, dptr--)
+        matlib_int ii = (matlib_int) i;
+        for ( ; (ii >= 0) && (dptr != NULL); 
+                ii -= FEM2D_NV, dptr--)
         {
+            debug_body("Attemptig to free all the allocated memory (i: %d)!", ii);
             matlib_free(dptr->vert_p);
             matlib_free(dptr->jmat);
             matlib_free(dptr->ijmat);
         }
         matlib_free(ea->elem_p);
+        ea->elem_p = NULL;
     }
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
@@ -310,6 +345,7 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                 strerror(errno), ea->nr_nodes);
     mcnt++;
 
+    /* Initialize memory */ 
     fem2d_vp* vp_ptr = NULL; 
     for ( vp_ptr = ea->vpatch_p; 
           vp_ptr < ea->nr_nodes + ea->vpatch_p; 
@@ -319,16 +355,17 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         errno = 0;
         vp_ptr->domain_p = calloc(init_size, sizeof(fem2d_te*));
         err_check( (vp_ptr->domain_p == NULL), clean_up, 
-                    "%s", "Memory allocation failed!", strerror(errno));
+                    "%s: Memory allocation failed!", strerror(errno));
         errno = 0;
         vp_ptr->vert_index   = calloc(init_size, sizeof(matlib_index));
         err_check( (vp_ptr->vert_index == NULL), clean_up, 
-                    "%s", "Memory allocation failed!", strerror(errno));
+                    "%s: Memory allocation failed!", strerror(errno));
 
         vp_ptr->len = 0;
     }
     debug_body("%s", "Memory allocated!");
     
+    /* Create the vertex patch */ 
     matlib_index offset; 
     matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
     matlib_index tofill, index;
@@ -401,23 +438,34 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         ea->vpatch_p[i].domain_p = realloc( ea->vpatch_p[i].domain_p, 
                                             ea->vpatch_p[i].len * sizeof(fem2d_te*)); 
         err_check( (ea->vpatch_p[i].domain_p == NULL), clean_up, 
-                        "%s", "Memory reallocation failed!", strerror(errno));
+                    "%s: Memory reallocation failed!", strerror(errno));
 
         errno = 0;
         ea->vpatch_p[i].vert_index = realloc( ea->vpatch_p[i].vert_index, 
                                               ea->vpatch_p[i].len * sizeof(matlib_index)); 
         err_check( (ea->vpatch_p[i].vert_index == NULL), clean_up, 
-                        "%s", "Memory reallocation failed!", strerror(errno));
+                   "%s: Memory reallocation failed!", strerror(errno));
     }
+    
+    mcnt++;
 
-    for ( i = 0; (i < ea->nr_nodes); i++)
+    /* Create edge information and put the domains in right order 
+     * such that the neighboring domains are next to each other in the list.
+     * */
+
+    /* Don't reuse the following pointer. 
+     * It will be used for freeing the memory in case of error!
+     * */ 
+    fem2d_vp *vp_bptr; 
+    
+    for ( vp_bptr = ea->vpatch_p; 
+          (vp_bptr < ea->nr_nodes + ea->vpatch_p); vp_bptr++)
     {
         errno = 0;
-        ea->vpatch_p[i].bvert_index = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
-        err_check( (ea->vpatch_p[i].bvert_index == NULL), clean_up, 
-                        "%s", "Memory reallocation failed!", strerror(errno));
+        vp_bptr->bvert_index = calloc(vp_bptr->len, sizeof(matlib_index));
+        err_check( (vp_bptr->bvert_index == NULL), clean_up, 
+                   "%s: Memory reallocation failed!", strerror(errno));
     }
-    mcnt++;
 
     matlib_index j, k, l, m, n, tmp;
     matlib_index next_vertex, other_vertex1, other_vertex2;
@@ -437,8 +485,10 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         
         ea->vpatch_p[i].bvert_index[0] = other_vertex1;
         next_vertex = other_vertex2; 
-        debug_body( "vert_index: %d, other vertex1: %d, other vertex2: %d, next vertex: %d", 
-                    ea->vpatch_p[i].vert_index[0], other_vertex1, other_vertex2, next_vertex);
+        debug_body( "vert_index: %d, other vertex1: %d, "
+                    "other vertex2: %d, next vertex: %d", 
+                    ea->vpatch_p[i].vert_index[0], other_vertex1, 
+                    other_vertex2, next_vertex);
         
         debug_body("patch length: %d", ea->vpatch_p[i].len);
         for (m = 1; m < ea->vpatch_p[i].len; m++ )
@@ -472,7 +522,7 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
                    if (del1 == dlist2[k])
                    {
                         found = true;
-                        debug_body( "Common domain found (j: %d, k: %d): %d, %d",
+                        debug_body( "Common domain found (j: %d, k: %d): %d",
                                     j+m, k, dlist2[k]->domain_index );
                         break;
                    }
@@ -512,7 +562,7 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
             }
             else
             {
-                debug_body("%s", "No common domain found (j: %d, k: %d)");
+                debug_body("%s", "No common domain found!");
                 /* copy the list in new a lists in order to
                  * continue in the backward direction
                  * */ 
@@ -609,16 +659,104 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         }
     }
 
+
+    mcnt++;
+    /* Create the node order array */ 
+    matlib_index list_len, zeroth;
+    matlib_index* node_list = NULL;
+    fem2d_err error;
+    fem2d_vp *vp_nptr;
+    for ( vp_nptr = ea->vpatch_p; 
+          vp_nptr < ea->nr_nodes + ea->vpatch_p; 
+          vp_nptr++)
+    {
+        errno = 0;
+        if(vp_nptr->point_enum == FEM2D_BOUNDARY)
+        {
+            vp_nptr->node_order = calloc(vp_nptr->len+1, sizeof(matlib_int));
+        }
+        else
+        {
+            vp_nptr->node_order = calloc(vp_nptr->len, sizeof(matlib_int));
+        }
+        err_check( (vp_nptr->node_order == NULL), clean_up, 
+                    "%s: Memory allocation failed!", strerror(errno));
+    }
+
+    for (i = 0; i < ea->nr_nodes; i++)
+    {
+        errno = 0;
+        if(ea->vpatch_p[i].point_enum == FEM2D_BOUNDARY)
+        {
+            node_list = calloc(ea->vpatch_p[i].len + 1, sizeof(matlib_index));
+        }
+        else
+        {
+            node_list = calloc(ea->vpatch_p[i].len, sizeof(matlib_index));
+        }
+        err_check( (node_list == NULL), clean_up, 
+                    "%s: Memory allocation failed!", strerror(errno));
+
+        list_len = ea->vpatch_p[i].len;
+        for (j = 0; j < list_len; j++)
+        {
+            dptr = ea->vpatch_p[i].domain_p[j];
+            dptr->pos_vpatch = j; /* position of the domain in the vertex patch */ 
+            offset =   ((matlib_index)dptr->vert_p[ea->vpatch_p[i].bvert_index[j]] 
+                     - (matlib_index)nptr0)/vsize;
+            debug_body("offset: %d", offset);
+            node_list[j] = offset;
+        }
+        if(ea->vpatch_p[i].point_enum == FEM2D_BOUNDARY)
+        {
+            j = list_len - 1;
+            debug_body("%s", "Boundary point encountered!");
+            other_vertex1 = (ea->vpatch_p[i].vert_index[j] + 1) % FEM2D_NV;
+            other_vertex2 = (ea->vpatch_p[i].vert_index[j] + 2) % FEM2D_NV;
+
+            next_vertex =   (ea->vpatch_p[i].bvert_index[j] == other_vertex1) 
+                          ? other_vertex2 : other_vertex1;
+            offset = ((matlib_index)dptr->vert_p[next_vertex] - (matlib_index)nptr0)/vsize;
+            debug_body("offset: %d", offset);
+            node_list[j+1] = offset;
+            list_len++;
+        }
+        zeroth = ((matlib_index)dptr->vert_p[ea->vpatch_p[i].vert_index[j]] - (matlib_index)nptr0)/vsize;
+        error = fem2d_sort_node_index(i, node_list, list_len, ea->vpatch_p[i].node_order);
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                    "%s", "Sorting of node indices failed!");
+        BEGIN_DEBUG
+            debug_print("node: %d", i);
+            for (j = 0; j < list_len; j++)
+            {
+                debug_print( "[%d]-> node index: %d, "
+                             "node order: %d",
+                             j, node_list[j], ea->vpatch_p[i].node_order[j]);
+            }
+        END_DEBUG
+        matlib_free(node_list);
+    }
+
     debug_exit("Exit Status: %s", "SUCCESS");
     return FEM2D_SUCCESS;
 
 clean_up:
+    if (mcnt == 3)
+    {
+        matlib_free(node_list);
+        for ( ; (vp_nptr < ea->vpatch_p) & (vp_nptr != NULL); 
+                vp_nptr--)
+        {
+            matlib_free(vp_nptr->node_order);
+        }
+        mcnt --;
+    }
     if (mcnt == 2)
     {
-        for ( ; (vp_ptr < ea->vpatch_p) & (vp_ptr != NULL); 
-                vp_ptr--)
+        for ( ; (vp_bptr < ea->vpatch_p) & (vp_bptr != NULL); 
+                vp_bptr--)
         {
-            matlib_free(vp_ptr->bvert_index);
+            matlib_free(vp_bptr->bvert_index);
         }
         mcnt --;
     }
@@ -636,6 +774,108 @@ clean_up:
     return FEM2D_FAILURE;
 }
 /*============================================================================*/
+
+fem2d_err fem2d_sort_node_index
+(
+    matlib_index  zeroth,
+    matlib_index* ilist,
+    matlib_index  ilen,
+    matlib_int*   iorder
+)
+{
+    debug_enter("Length of the index list: %d", ilen);
+
+    err_check(    (ilist == NULL) 
+               || (iorder == NULL), clean_up,
+               "%s", "Null pointers encountered!");
+
+    matlib_index s = 0, l = 0;
+    matlib_index i, j, mcnt = 0;
+    
+    errno = 0;
+    matlib_index* plist = calloc(ilen, sizeof(matlib_index));
+    err_check( plist == NULL, clean_up, 
+               "%s: Memory allocation failed!", strerror(errno));
+    mcnt++;
+
+    errno = 0;
+    matlib_index* nlist = calloc(ilen, sizeof(matlib_index));
+    err_check( nlist == NULL, clean_up, 
+               "%s: Memory allocation failed!", strerror(errno));
+    mcnt++;
+
+    for (i = 0; i < ilen; i++)
+    {
+        if(zeroth > ilist[i])
+        {
+            iorder[i] = (-1);
+            nlist[s] = i;
+            s++;
+        }
+        else
+        {
+            iorder[i] = 1;
+            plist[l]  = i;
+            l++;
+        }
+    }
+    debug_body( "positive ones: %d, negative ones: %d", l, s);
+    
+    errno = 0;
+    plist = realloc(plist, l * sizeof(matlib_index));
+    err_check( (plist == NULL) && (l > 0), clean_up, 
+               "%s: Memory allocation failed!", strerror(errno));
+
+    errno = 0;
+    nlist = realloc(nlist, s * sizeof(matlib_index));
+    err_check( (nlist == NULL) && (s > 0), clean_up, 
+               "%s: Memory allocation failed!", strerror(errno));
+    
+    if(plist != NULL)
+    {
+        for (j = 0; j < l; j++)
+        {
+            for(i = j+1; i < l; i++)
+            {
+                if (ilist[plist[i]]>ilist[plist[j]]);
+                {
+                    iorder[plist[j]] += 1;
+                }
+            }
+        }
+    }
+
+    if(nlist != NULL)
+    {
+        for (j = 0; j < s; j++)
+        {
+            for(i = j+1; i < s; i++)
+            {
+                if (ilist[nlist[i]]<ilist[nlist[j]]);
+                {
+                    iorder[nlist[j]] += (-1); 
+                }
+            }
+        }
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS");
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt == 2)
+    {
+        matlib_free(nlist);
+        mcnt --;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(plist);
+    }
+    debug_exit("Exit Status: %s", "FAILURE");
+    return FEM2D_FAILURE;
+}
+
 
 matlib_real fem2d_check_vp(fem2d_ea ea)
 {
@@ -1792,3 +2032,64 @@ clean_up:
     return MATLIB_NAN;
 }
 
+/*============================================================================*/
+matlib_index fem2d_get_nnz(fem2d_ea ea)
+{
+    debug_enter( "nr nodes: %d, nr domains: %d",
+                 ea.nr_nodes, ea.len);
+
+    err_check( ea.vpatch_p == NULL, clean_up, 
+               "%s", "Null pointer encountered!");
+    matlib_index i, j;
+    matlib_index nnz = 0;
+    for (i = 0; i < ea.nr_nodes; i++)
+    {
+        nnz++;
+        for (j = 0; j < ea.vpatch_p[i].len; j++)
+        {
+            if (ea.vpatch_p[i].node_order[j]>0)
+                nnz++;
+        }
+
+        if (ea.vpatch_p[i].point_enum == FEM2D_BOUNDARY)
+        {
+            if (ea.vpatch_p[i].node_order[j]>0)
+                nnz++;
+        }
+    }
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return nnz;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+}
+
+#if 0
+void fem2d_GMMSparsity
+(
+    fem2d_ea      ea,
+    matlib_index  nnz,
+    matlib_index* row, /* required to be pre-allocated */                     
+    matlib_index* col  /* required to be pre-allocated */                  
+)
+{
+    debug_enter( "nr nodes: %d, nr domains: %d, nr non-zero entries: %d",
+                 ea.nr_nodes, ea.len, nnz);
+    err_check( ea.vpatch_p == NULL, 
+               "%s", "Null pointer encountered!");
+
+    /* length of col: nnz
+     * length of row: nr_nodes
+     *
+     * */ 
+    matlib_index s = 0;
+    matlib_index i = 0;
+    row[i] = s;
+    col[s] = 
+
+
+
+
+}
+#endif

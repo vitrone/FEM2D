@@ -305,6 +305,7 @@ static const matlib_real qwa[NR_QNODES] =
      2.199034873106438e-01,
 };
 
+/* array of centroids */ 
 #define SIZE_ca 310
 static const matlib_real ca[SIZE_ca] = 
 {
@@ -465,6 +466,65 @@ static const matlib_real ca[SIZE_ca] =
     -3.788234766030948e-01,     8.496934572078914e-01,
 };
 
+#define NR_QNODES_D10 (25)
+
+static const matlib_real xi10[2*NR_QNODES_D10] = 
+{
+    -9.653080397659108e-03,    -9.806938392046819e-01, 
+    -9.653080397659108e-03,    -9.653080397658886e-03,
+    -9.806938392046820e-01,    -9.653080397658553e-03,
+    -9.617211695143177e-01,    -9.617211695143172e-01,
+     9.234423390286350e-01,    -9.617211695143179e-01,
+    -9.617211695143169e-01,     9.234423390286350e-01,
+    -7.325304897982617e-01,    -9.305527590353451e-01,
+     6.630832488336067e-01,    -7.325304897982617e-01,
+    -9.305527590353451e-01,     6.630832488336074e-01,
+     6.630832488336067e-01,    -9.305527590353451e-01,
+    -7.325304897982616e-01,     6.630832488336069e-01,
+    -9.305527590353454e-01,    -7.325304897982612e-01,
+    -3.333333333333335e-01,    -3.333333333333331e-01,
+    -3.466137274373262e-01,    -9.248345453176166e-01,
+     2.714482727549430e-01,    -3.466137274373262e-01,
+    -9.248345453176166e-01,     2.714482727549430e-01,
+     2.714482727549428e-01,    -9.248345453176166e-01,
+    -3.466137274373262e-01,     2.714482727549430e-01,
+    -9.248345453176168e-01,    -3.466137274373257e-01,
+    -6.310299746295072e-01,    -6.310299746295067e-01,
+     2.620599492590139e-01,    -6.310299746295071e-01,
+    -6.310299746295067e-01,     2.620599492590143e-01,
+    -1.435303581125623e-01,    -7.129392837748754e-01,
+    -1.435303581125623e-01,    -1.435303581125622e-01,
+    -7.129392837748755e-01,    -1.435303581125620e-01
+};
+
+static const matlib_real qwa10[NR_QNODES_D10] = 
+{
+     1.958518099683661e-02, 
+     1.958518099683661e-02,
+     1.958518099683661e-02,
+     1.277071846023731e-02,
+     1.277071846023731e-02,
+     1.277071846023731e-02,
+     5.792456292651268e-02,
+     5.792456292651268e-02,
+     5.792456292651268e-02,
+     5.792456292651268e-02,
+     5.792456292651268e-02,
+     5.792456292651268e-02,
+     1.672297487479479e-01,
+     7.747809817203781e-02,
+     7.747809817203781e-02,
+     7.747809817203781e-02,
+     7.747809817203781e-02,
+     7.747809817203781e-02,
+     7.747809817203781e-02,
+     1.572675394927546e-01,
+     1.572675394927546e-01,
+     1.572675394927546e-01,
+     1.504946559370880e-01,
+     1.504946559370880e-01,
+     1.504946559370880e-01
+};
 
 
 static const fem2d_cc nodes = { .len = SIZE_p/2, 
@@ -476,6 +536,8 @@ static const fem2d_cc cen = { .len = NR_DOMAINS,
 static const fem2d_cc xi = { .len = NR_QNODES, 
                              .elem_p = (matlib_real*)xi4 };
 
+static const fem2d_cc xi_10 = { .len = NR_QNODES_D10, 
+                             .elem_p = (matlib_real*)xi10 };
 /*============================================================================*/
 
 int init_suite(void)
@@ -531,6 +593,53 @@ static fem2d_err cyclic_permutation
     }
     return error;
 }
+void sort_vertices
+(
+    const matlib_index *ia, 
+    matlib_index *sia
+)
+{
+    matlib_real *vert1, *vert2, *vert3;
+    matlib_index i, index1, index2, index3, pos1, pos2, pos3;
+
+    for ( i = 0; i < FEM2D_NV * NR_DOMAINS; i += FEM2D_NV)
+    {
+
+        /* Vertex indices are sorted in the increasing order
+         * */ 
+        index1 = ia[i + FEM2D_INDEX_V1];
+        pos1   = FEM2D_INDEX_V1;
+        if (index1 > ia[i + FEM2D_INDEX_V2])
+        {
+            index1 = ia[i + FEM2D_INDEX_V2];
+            pos1 = FEM2D_INDEX_V2;
+        }
+        if (index1 > ia[i + FEM2D_INDEX_V3])
+        {
+            index1 = ia[i + FEM2D_INDEX_V3];
+            pos1 = FEM2D_INDEX_V3;
+        }
+        pos2   = ((pos1 + 1) % FEM2D_NV);
+        pos3   = ((pos1 + 2) % FEM2D_NV);
+        index2 = ia[i + pos2];
+        if (index2 > ia[i + pos3])
+        {
+            index2 = ia[i + pos3];
+            index3 = ia[i + pos2];
+        }
+        else
+        {
+            index3 = ia[i + pos3];
+        }
+        sia[i + FEM2D_INDEX_V1] = index1;
+        sia[i + FEM2D_INDEX_V2] = index2;
+        sia[i + FEM2D_INDEX_V3] = index3;
+    }
+}
+
+
+
+
 /*============================================================================*/
 
 void test_create_ea(void)
@@ -542,7 +651,9 @@ void test_create_ea(void)
     fem2d_te* dptr = ea.elem_p; /* domain pointer */
     matlib_real* vptr; /* vertex pointer */ 
 
-    matlib_index const *pia = ia;
+    matlib_index sia[SIZE_ia];
+    sort_vertices(ia, sia);
+    matlib_index const *pia = sia;
     matlib_real e_relative, x1, xx1, x2, xx2;
 
     for ( dptr = ea.elem_p; 
@@ -599,26 +710,27 @@ void test_create_ea(void)
     fem2d_vp* vp_ptr;
     matlib_index j;
     for ( vp_ptr = ea.vpatch_p; 
-          vp_ptr < nodes.len + ea.vpatch_p; vp_ptr++)
+          vp_ptr < ea.nr_nodes + ea.vpatch_p; vp_ptr++)
     {
         
-        printf("%d", vp_ptr->len);
+        fprintf(stderr, "\n");
+        fprintf(stderr, "patch lenth: %d\n", vp_ptr->len);
         for (j = 0; j< vp_ptr->len; j++)
         {
-            printf("%d ", vp_ptr->domain_p[j]->domain_index);
+            fprintf(stderr, "%d ", vp_ptr->domain_p[j]->domain_index);
         }
-        printf("\n");
+        fprintf(stderr, "\n");
         for (j = 0; j< vp_ptr->len; j++)
         {
-            printf("%d ", vp_ptr->vert_index[j]);
+            fprintf(stderr, "%d ", vp_ptr->vert_index[j]);
         }
-        printf("\n");
+        fprintf(stderr, "\n");
         for (j = 0; j< vp_ptr->len; j++)
         {
-            printf("%d ", vp_ptr->bvert_index[j]);
+            fprintf(stderr, "%d ", vp_ptr->bvert_index[j]);
         }
-        printf("\n");
-        printf("\n");
+        fprintf(stderr, "\n");
+        fprintf(stderr, "\n");
     }
     fem2d_free_ea(ea);
 }
@@ -635,6 +747,26 @@ void test_create_vp(void)
     debug_body( "Error: %0.16f", err);
     CU_ASSERT_TRUE(err < TOL);
 
+    fem2d_vp* vp_ptr;
+    matlib_index j;
+    for ( vp_ptr = ea.vpatch_p; 
+          vp_ptr < ea.nr_nodes + ea.vpatch_p; vp_ptr++)
+    {
+        
+        fprintf(stderr, "\n");
+        fprintf(stderr, "patch lenth: %d\n", vp_ptr->len);
+        for (j = 0; j< vp_ptr->len; j++)
+        {
+            fprintf(stderr, "%d ", vp_ptr->domain_p[j]->domain_index);
+        }
+        fprintf(stderr, "\n");
+        for (j = 0; j< vp_ptr->len; j++)
+        {
+            fprintf(stderr, "%d ", vp_ptr->node_order[j]);
+        }
+        fprintf(stderr, "\n");
+        fprintf(stderr, "\n");
+    }
     fem2d_free_ea(ea);
 }
 
@@ -649,7 +781,9 @@ void test_create_ea1(void)
     fem2d_te* dptr = ea.elem_p; /* domain pointer */
     matlib_real* vptr; /* vertex pointer */ 
 
-    matlib_index *pia = cia;
+    matlib_index sia[SIZE_ia];
+    sort_vertices(ia, sia);
+    matlib_index const *pia = sia;
     matlib_real e_relative, x1, xx1, x2, xx2;
 
     for ( dptr = ea.elem_p; 
@@ -714,7 +848,9 @@ void test_create_ea2(void)
     fem2d_te* dptr = ea.elem_p; /* domain pointer */
     matlib_real* vptr; /* vertex pointer */ 
 
-    matlib_index *pia = cia;
+    matlib_index sia[SIZE_ia];
+    sort_vertices(ia, sia);
+    matlib_index const *pia = sia;
     matlib_real e_relative, x1, xx1, x2, xx2;
 
     for ( dptr = ea.elem_p; 
@@ -776,11 +912,13 @@ void test_create_ia(void)
 
     matlib_index ia_tmp[SIZE_ia];
     fem2d_create_ia(ea, ia_tmp);
+    matlib_index sia[SIZE_ia];
+    sort_vertices(ia, sia);
     
     BEGIN_DEBUG
         for (matlib_index i=0; i< SIZE_ia; i++)
         {
-            debug_print("ia[%d] -> actual: %d, computed: %d", i, ia[i], ia_tmp[i]);
+            debug_print("ia[%d] -> actual: %d, computed: %d", i, sia[i], ia_tmp[i]);
         }
     END_DEBUG
 
@@ -869,7 +1007,7 @@ void test_refbasis(void)
     }
 }
 
-
+#if 0
 void test_ref2mesh(void)
 {
     matlib_index cia1[SIZE_ia], cia2[SIZE_ia];
@@ -914,6 +1052,7 @@ void test_ref2mesh(void)
         }   
     }
 }
+#endif
 
 /*============================================================================*/
 fem2d_err poly_func
@@ -1632,24 +1771,59 @@ void test_prj(void)
 
 void test_quadM(void)
 {
-    matlib_index m = 1;
-    matlib_index n = 1;
+    matlib_index m, m_max = 4;
+    matlib_index n, n_max = 4;
 
     /* quadW: quadrature weights */ 
-    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+    matlib_xv quadW = {.len = NR_QNODES_D10, .elem_p = (matlib_real*)qwa10};
 
-    float e_relative = fem2d_check_quadM(xi, quadW, m, n);
-    debug_exit("Relative error: %0.16f", e_relative);
-    if(isnan(e_relative))
+    matlib_real e_relative;
+    for(m = 0; m < m_max; m++)
     {
-        CU_ASSERT_TRUE(false);
-    }
-    else
-    {
-        CU_ASSERT_TRUE(e_relative<TOL);
+        for(n = 0; n < n_max; n++)
+        {
+            float e_relative = fem2d_check_quadM(xi_10, quadW, m, n);
+            debug_exit("Relative error: %0.16f", e_relative);
+            if(isnan(e_relative))
+            {
+                CU_ASSERT_TRUE(false);
+            }
+            else
+            {
+                CU_ASSERT_TRUE(e_relative<TOL);
+            }
+        }
     }
 }
 
+void test_sort(void)
+{
+    matlib_index zeroth = 5;
+    matlib_index ilist[8] = { 2, 19, 6, 15, 3, 18, 9, 11};
+    matlib_index ilen = 8;
+    matlib_int iorder[8];
+    fem2d_sort_node_index(zeroth, ilist, ilen, iorder);
+
+    fprintf(stderr, "\n");
+    for( matlib_index i=0; i<8; i++)
+    {
+        fprintf(stderr, "%d ", iorder[i]);
+    
+    }
+    fprintf(stderr, "\n");
+}
+void test_nnz(void)
+{
+    fem2d_ea ea;
+    fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    fem2d_create_vp(&ea);
+    matlib_index nnz = fem2d_get_nnz(ea);
+    debug_body("NNZ: %d", nnz);
+
+
+    fem2d_free_ea(ea);
+
+}
 
 /*============================================================================*/
 
@@ -1666,7 +1840,7 @@ int main()
     /* Create a test array */
     CU_TestInfo test_array[] = 
     {
-        //{ "Create vertex patch"              , test_create_vp},
+        { "Create vertex patch"              , test_create_vp},
         //{ "Create element array"               , test_create_ea },
         //{ "Create element array1"              , test_create_ea1},
         //{ "Create element array2"              , test_create_ea2},
@@ -1674,13 +1848,14 @@ int main()
         //{ "Centroid"                           , test_centroid  },
         //{ "Centroid1"                          , test_centroid1 },
         //{ "Ref. basis"                         , test_refbasis  },
-        //{"Ref to mesh"                         , test_ref2mesh  },
         //{ "Interpolation on trianglar elements", test_interp    },
         //{ "Interpolation on trianglar elements1", test_interp1    },
         //{ "L2 norm", test_normL2    },
         //{ "Inner product", test_iprod    },
         //{ "projection ", test_prj    },
-        { "quadM ", test_quadM    },
+        //{ "quadM ", test_quadM    },
+        //{"test sort", test_sort},
+        {"test NNZ", test_nnz},
         CU_TEST_INFO_NULL,
     };
 
