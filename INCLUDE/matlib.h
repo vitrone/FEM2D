@@ -179,10 +179,9 @@ typedef struct
 
 typedef enum
 {
-    MATLIB_CSR3,
-    MATLIB_CSC3, 
-    MATLIB_COO,
-    MATLIB_DIA
+    MATLIB_CSR,
+    MATLIB_CSC, 
+    MATLIB_COO
 
 } MATLIB_SPARSE;
 

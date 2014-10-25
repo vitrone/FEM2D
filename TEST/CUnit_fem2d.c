@@ -1782,7 +1782,7 @@ void test_quadM(void)
     {
         for(n = 0; n < n_max; n++)
         {
-            float e_relative = fem2d_check_quadM(xi_10, quadW, m, n);
+            e_relative = fem2d_check_quadM(xi_10, quadW, m, n);
             debug_exit("Relative error: %0.16f", e_relative);
             if(isnan(e_relative))
             {
@@ -1796,6 +1796,39 @@ void test_quadM(void)
     }
 }
 
+void test_quadM2(void)
+{
+    matlib_index m;
+    matlib_index n;
+    matlib_real e_relative;
+    /* quadW: quadrature weights */ 
+    matlib_index D;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+
+
+    for (D = 3; D < 51; D++)
+    {
+        m = (matlib_index) (D/2); 
+        n = D - m - 2;
+        fem2d_symq(D, &xi_D, &quadW);
+
+        e_relative = fem2d_check_quadM(xi_D, quadW, m, n);
+        debug_exit( "D: %d, Relative error: %0.16f",
+                    D, e_relative);
+        if(isnan(e_relative))
+        {
+            CU_ASSERT_TRUE(false);
+        }
+        else
+        {
+            CU_ASSERT_TRUE(e_relative<TOL);
+        }
+        matlib_free(xi_D.elem_p);
+        matlib_free(quadW.elem_p);
+    }
+}
+
 void test_sort(void)
 {
     matlib_index zeroth = 5;
@@ -1804,6 +1837,13 @@ void test_sort(void)
     matlib_int iorder[8];
     fem2d_sort_node_index(zeroth, ilist, ilen, iorder);
 
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Zeroth: %d\n", zeroth);
+    for( matlib_index i=0; i<8; i++)
+    {
+        fprintf(stderr, "%d ", ilist[i]);
+    
+    }
     fprintf(stderr, "\n");
     for( matlib_index i=0; i<8; i++)
     {
@@ -1819,6 +1859,23 @@ void test_nnz(void)
     fem2d_create_vp(&ea);
     matlib_index nnz = fem2d_get_nnz(ea);
     debug_body("NNZ: %d", nnz);
+
+    matlib_index* col = calloc(nnz, sizeof(matlib_index));
+    matlib_index* row = calloc(ea.nr_nodes + 1, sizeof(matlib_index));
+
+    fem2d_GMMSparsity(ea, row, col);
+    debug_body("NNZ: %d, last row element: %d", nnz, row[ea.nr_nodes]);
+    
+    BEGIN_DEBUG
+        matlib_index i, j;
+        for (i = 0; i < ea.nr_nodes; i++)
+        {
+            for (j = row[i]; j < row[i+1]; j++)
+            {
+                debug_print("GMM[%d][%d]: X", i, col[j]);
+            }
+        }
+    END_DEBUG
 
 
     fem2d_free_ea(ea);
@@ -1841,20 +1898,21 @@ int main()
     CU_TestInfo test_array[] = 
     {
         { "Create vertex patch"              , test_create_vp},
-        //{ "Create element array"               , test_create_ea },
-        //{ "Create element array1"              , test_create_ea1},
-        //{ "Create element array2"              , test_create_ea2},
-        //{ "Create index array"              , test_create_ia},
-        //{ "Centroid"                           , test_centroid  },
-        //{ "Centroid1"                          , test_centroid1 },
-        //{ "Ref. basis"                         , test_refbasis  },
-        //{ "Interpolation on trianglar elements", test_interp    },
-        //{ "Interpolation on trianglar elements1", test_interp1    },
-        //{ "L2 norm", test_normL2    },
-        //{ "Inner product", test_iprod    },
-        //{ "projection ", test_prj    },
-        //{ "quadM ", test_quadM    },
-        //{"test sort", test_sort},
+        { "Create element array"               , test_create_ea },
+        { "Create element array1"              , test_create_ea1},
+        { "Create element array2"              , test_create_ea2},
+        { "Create index array"              , test_create_ia},
+        { "Centroid"                           , test_centroid  },
+        { "Centroid1"                          , test_centroid1 },
+        { "Ref. basis"                         , test_refbasis  },
+        { "Interpolation on trianglar elements", test_interp    },
+        { "Interpolation on trianglar elements1", test_interp1    },
+        { "L2 norm", test_normL2    },
+        { "Inner product", test_iprod    },
+        { "projection ", test_prj    },
+        { "quadM ", test_quadM    },
+        { "quadM2 ", test_quadM2    },
+        {"test sort", test_sort},
         {"test NNZ", test_nnz},
         CU_TEST_INFO_NULL,
     };

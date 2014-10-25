@@ -40,6 +40,7 @@ typedef enum
 typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
+    matlib_index* nindex_p; /* pointer to the node indices forming the triangle */ 
     matlib_index  domain_index;
     matlib_index  pos_vpatch;
     matlib_real   jacob;
@@ -72,7 +73,7 @@ typedef struct
 
 typedef struct
 {
-    matlib_real* nbase;    /* node base address */ 
+    matlib_real* node_p;    /* node base address */ 
     matlib_index len;      /* nr of domains */ 
     matlib_index nr_nodes; /* nr of nodes */ 
     fem2d_te*    elem_p;
@@ -90,6 +91,9 @@ extern const matlib_index FEM2D_INDEX_J11;
 extern const matlib_index FEM2D_INDEX_J12;
 extern const matlib_index FEM2D_INDEX_J21;
 extern const matlib_index FEM2D_INDEX_J22;
+
+/* Ref. triangle vertices */
+extern const matlib_real FEM2D_VERT[6];
 
 /* Vertex indices */ 
 extern const matlib_index FEM2D_INDEX_V1;
@@ -238,5 +242,43 @@ matlib_real fem2d_check_quadM
 );
 
 matlib_index fem2d_get_nnz(fem2d_ea ea);
+
+fem2d_err fem2d_GMMSparsity
+(
+    fem2d_ea      ea,
+    matlib_index* row, /* required to be pre-allocated */                     
+    matlib_index* col  /* required to be pre-allocated */                  
+);
+
+
+fem2d_err fem2d_XCSRGMM
+(
+    fem2d_ea        ea,
+    matlib_xv       q,
+    matlib_index*   row,                     
+    matlib_index*   col,                     
+    matlib_real*    ugpmm                   
+);
+
+
+fem2d_err fem1d_xm_sparse_GMM
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
+    matlib_xm         Q,
+    matlib_xv         phi,
+    matlib_xm_sparse* M
+);
+/*============================================================================+/
+ | Quadrature on triangular domain
+/+============================================================================*/
+
+fem2d_err fem2d_symq
+( 
+    matlib_index n, 
+    fem2d_cc*    xi, 
+    matlib_xv*   quadW 
+);
+
 
 #endif

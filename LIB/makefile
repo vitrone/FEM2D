@@ -134,7 +134,8 @@ SOURCES = triangle.c      \
 	  fem2d.c         \
 	  matlib.c        \
 	  matlib_io.c     \
-	  jacobi.c        
+	  jacobi.c        \
+	  sym_quad.c
 
 OBJECTS = $(SOURCES:%.c=$(BUILDDIR)/%.o)
 
