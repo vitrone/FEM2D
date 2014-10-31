@@ -17,7 +17,7 @@ MKL_PATH   = "$(MKLROOT)/lib/intel64"
 CMPLR_PATH = "$(MKLROOT)/../compiler/lib/intel64"
 EXT = so
 
-IFACE_LIB     = $(MKL_PATH)/libmkl_intel_lp64.$(EXT)
+IFACE_LIB     = $(MKL_PATH)/libmkl_intel_ilp64.$(EXT)
 THREADING_LIB = $(MKL_PATH)/libmkl_intel_thread.$(EXT)
 OMP_LIB       = -L$(CMPLR_PATH) -liomp5
 CORE_LIB      = $(MKL_PATH)/libmkl_core.$(EXT)

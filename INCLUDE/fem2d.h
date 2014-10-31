@@ -37,12 +37,17 @@ typedef enum
 
 } FEM2D_POINT_T;
 
+#define FEM2D_POINT_T_ENUM2STR(point_enum)                          \
+    (FEM2D_INTERIOR == point_enum ? "INTERIOR POINT":               \
+     (FEM2D_BOUNDARY == point_enum ? "BOUNDARY POINT": "UNKNOWN"))
+
+
 typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
     matlib_index* nindex_p; /* pointer to the node indices forming the triangle */ 
     matlib_index  domain_index;
-    matlib_index  pos_vpatch;
+    matlib_index* pos_vpatch;
     matlib_real   jacob;
     matlib_real*  ijmat;
     matlib_real*  jmat;
@@ -55,6 +60,7 @@ typedef struct
  * */ 
 typedef struct
 {
+    matlib_index node_index;
     matlib_index len; /* nr. of domains in the vertex patch */ 
     FEM2D_POINT_T point_enum;
     
@@ -80,6 +86,20 @@ typedef struct
     fem2d_vp*    vpatch_p;
 
 } fem2d_ea; /* element array type */ 
+
+
+/* NZE : Non-Zero Elements */ 
+typedef enum
+{
+    FEM2D_GMM_INIT,
+    FEM2D_GET_SPARSITY_ONLY,
+    FEM2D_GET_NZE_ONLY,
+    FEM2D_GET_SPARSITY_NZE,
+    FEM2D_GMM_FREE
+
+} FEM2D_OP_GMM; /* OPTIONS GMM */ 
+
+
 
 /* Cartesian coordinate indices */ 
 extern const matlib_index FEM2D_INDEX_DIM1;
@@ -165,7 +185,15 @@ fem2d_err fem2d_ref2mesh
           fem2d_cc* x
 );
 
-fem2d_err fem2d_interp
+fem2d_err fem2d_xinterp
+(
+    const fem2d_ea  ea,
+    const matlib_xv u_nodes,
+    const matlib_xm vphi,
+          matlib_xv u_interp
+);
+
+fem2d_err fem2d_zinterp
 (
     const fem2d_ea  ea,
     const matlib_zv u_nodes,
@@ -173,14 +201,30 @@ fem2d_err fem2d_interp
           matlib_zv u_interp
 );
 
-matlib_real fem2d_normL2
+matlib_real fem2d_xnormL2
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes,
+    matlib_xv quadW
+);
+
+matlib_real fem2d_znormL2
 (
     fem2d_ea  ea,
     matlib_zv u_qnodes,
     matlib_xv quadW
 );
 
-matlib_real fem2d_iprod 
+matlib_real fem2d_xiprod 
+/* Inner product iprod = (u, conj(v))_{\Omega} */ 
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes,
+    matlib_xv v_qnodes,
+    matlib_xv quadW
+);
+
+matlib_real fem2d_ziprod 
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
@@ -198,7 +242,15 @@ fem2d_err fem2d_quadP
     matlib_xm* quadP
 );
 
-fem2d_err fem2d_prj
+fem2d_err fem2d_xprj
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_xm quadP,
+    matlib_xv u_prj
+);
+
+fem2d_err fem2d_zprj
 (
     fem2d_ea  ea,
     matlib_zv u_qnodes, /* values at the quadrature nodes */ 
@@ -206,20 +258,39 @@ fem2d_err fem2d_prj
     matlib_zv u_prj
 );
 
-fem2d_err fem2d_LEprj
+fem2d_err fem2d_NB_xprj
+(
+    fem2d_ea  ea,
+    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv u_prj
+);
+
+fem2d_err fem2d_NB_zprj
 (
     fem2d_ea  ea,
     matlib_zv u_nodes, /* values at the nodes */ 
     matlib_zv u_prj
 );
 
-matlib_real fem2d_LEnormL2
+matlib_real fem2d_NB_xnormL2
+(
+    fem2d_ea  ea,
+    matlib_xv u_nodes /* values at the nodes */ 
+);
+
+matlib_real fem2d_NB_znormL2
 (
     fem2d_ea  ea,
     matlib_zv u_nodes /* values at the nodes */ 
 );
 
-matlib_complex fem2d_LEiprod
+matlib_real fem2d_NB_xiprod
+(
+    fem2d_ea  ea,
+    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv v_nodes
+);
+matlib_complex fem2d_NB_ziprod
 (
     fem2d_ea  ea,
     matlib_zv u_nodes, /* values at the nodes */ 
@@ -261,12 +332,26 @@ fem2d_err fem2d_XCSRGMM
 );
 
 
-fem2d_err fem1d_xm_sparse_GMM
+fem2d_err fem2d_xm_sparse_GMM
 /* Real - Assemble Global Mass Matrix*/ 
 (
     fem2d_ea          ea,
     matlib_xm         Q,
     matlib_xv         phi,
+    matlib_xm_sparse* M
+);
+fem2d_err fem2d_XCSRGMM1
+(
+    fem2d_ea      ea,
+    matlib_index* row,                     
+    matlib_index* col,                     
+    matlib_real*  ugpmm                   
+);
+
+fem2d_err fem2d_xm_sparse_GMM1
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
     matlib_xm_sparse* M
 );
 /*============================================================================+/

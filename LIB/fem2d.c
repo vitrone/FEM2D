@@ -237,6 +237,11 @@ fem2d_err fem2d_create_ea
         err_check( (dptr->vert_p == NULL), clean_up, 
                    "%s: memory allocation for vertex pointers failed (domain nr: %d)!", 
                    strerror(errno), dptr->domain_index);
+        errno = 0;
+        dptr->pos_vpatch = calloc( FEM2D_NV, sizeof(matlib_real));
+        err_check( (dptr->pos_vpatch == NULL), clean_up, 
+                   "%s: memory allocation failed (domain nr: %d)!", 
+                   strerror(errno), dptr->domain_index);
 
         errno = 0;
         dptr->nindex_p = calloc( FEM2D_NV, sizeof(matlib_index));
@@ -333,6 +338,7 @@ clean_up:
         {
             debug_body("Attemptig to free all the allocated memory (i: %d)!", ii);
             matlib_free(dptr->vert_p);
+            matlib_free(dptr->pos_vpatch);
             matlib_free(dptr->nindex_p);
             matlib_free(dptr->jmat);
             matlib_free(dptr->ijmat);
@@ -494,6 +500,8 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
 
     for (i = 0; i < ea->nr_nodes; i++)
     {
+        ea->vpatch_p[i].node_index = i;
+
         other_vertex1 = (ea->vpatch_p[i].vert_index[0] + 1) % FEM2D_NV;
         other_vertex2 = (ea->vpatch_p[i].vert_index[0] + 2) % FEM2D_NV;
         
@@ -710,7 +718,8 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         for (j = 0; j < list_len; j++)
         {
             dptr = ea->vpatch_p[i].domain_p[j];
-            dptr->pos_vpatch = j; /* position of the domain in the vertex patch */ 
+            /* position of the domain in the vertex patch */ 
+            dptr->pos_vpatch[ea->vpatch_p[i].vert_index[j]] = j; 
             node_list[j] = dptr->nindex_p[ea->vpatch_p[i].bvert_index[j]];
         }
         if(ea->vpatch_p[i].point_enum == FEM2D_BOUNDARY)
@@ -729,7 +738,9 @@ fem2d_err fem2d_create_vp(fem2d_ea *ea)
         err_check( (error == FEM2D_FAILURE), clean_up, 
                     "%s", "Sorting of node indices failed!");
         BEGIN_DEBUG
-            debug_print("node: %d", i);
+            debug_print( "node: %d, patch length: %d, point_enum: %s",
+                         i, ea->vpatch_p[i].len,
+                         FEM2D_POINT_T_ENUM2STR(ea->vpatch_p[i].point_enum));
             for (j = 0; j < list_len; j++)
             {
                 debug_print( "[%d]-> node index: %d, "
@@ -960,6 +971,7 @@ void fem2d_free_ea(fem2d_ea ea)
           dptr++)
     {
         matlib_free(dptr->vert_p);
+        matlib_free(dptr->pos_vpatch);
         matlib_free(dptr->nindex_p);
         matlib_free(dptr->jmat);
         matlib_free(dptr->ijmat);
@@ -1158,7 +1170,9 @@ fem2d_err fem2d_ref2mesh
         *ptr = vptr[FEM2D_INDEX_DIM1]; ptr++;
         *ptr = vptr[FEM2D_INDEX_DIM2];
         
-        matlib_xgemm( alpha, vphi_tmp, nodes_mat, beta, x_tmp );
+        error = matlib_xgemm( alpha, vphi_tmp, nodes_mat, beta, x_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Matrix multiplication failed!");
         
         //DEBUG_PRINT_XM(x_tmp, "Points in domain[%d]: ", dptr->domain_index);
 
@@ -1173,10 +1187,118 @@ fem2d_err fem2d_ref2mesh
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
-}
-/*============================================================================*/
 
-fem2d_err fem2d_interp
+} /* End of fem2d_ref2mesh */ 
+/*============================================================================*/
+fem2d_err fem2d_xinterp
+(
+    const fem2d_ea  ea,
+    const matlib_xv u_nodes,
+    const matlib_xm vphi,
+          matlib_xv u_interp
+)
+/* 
+ * Computes the interpolation over FEM-elements.
+ *
+ *
+ * */
+
+{
+    debug_enter( "length of u_nodes: %d", 
+                 u_nodes.len);
+    
+    err_check(    (ea.elem_p      == NULL)   
+               || (u_nodes.elem_p == NULL) 
+               || (vphi.elem_p    == NULL), clean_up, 
+               "%s", "Null pointer(s) ecountered!");
+    
+    /* Length of u_nodes = nr. of nodes */ 
+    err_check( (u_nodes.len != ea.nr_nodes ), clean_up, 
+               "Dimension mismatch (u_nodes: %d, nr nodes: )",
+               u_nodes.len, ea.nr_nodes);
+
+    /* Length of u_interp = nr of quad. nodes x nr of domains 
+     * */ 
+    err_check( (u_interp.len != (vphi.lenc * ea.len) ), clean_up, 
+               "Dimension mismatch (u_interp: %d)", u_interp.len);
+    
+    matlib_real alpha = 1.0;
+    matlib_real beta  = 0.0;
+
+    matlib_index INDEX_REAL = 0;
+
+    matlib_index mcnt = 0;
+    matlib_xv u1_tmp;    
+    fem2d_err error = matlib_create_xv( FEM2D_NV, &u1_tmp, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation failed!");
+    mcnt++;
+
+    matlib_xv u2_tmp = { .len    = vphi.lenc, 
+                         .type   = MATLIB_COL_VECT,
+                         .elem_p = u_interp.elem_p };
+
+    fem2d_te* dptr; /* domain pointer */
+
+    matlib_real* ptr; 
+    matlib_real* uptr; /* vertex pointer */ 
+    matlib_real* uptr0 = u_nodes.elem_p; /* base address */ 
+
+    /* Convert vphi to row-major format */ 
+    matlib_xm vphi_tmp = { .order = MATLIB_ROW_MAJOR,
+                           .op    = MATLIB_TRANS,
+                           .lenr  = vphi.lenc,
+                           .lenc  = FEM2D_NV,
+                           .elem_p = vphi.elem_p };
+
+
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        ptr = u1_tmp.elem_p;
+
+        /* Get the first vertex */ 
+        uptr = uptr0 + dptr->nindex_p[FEM2D_INDEX_V1]; 
+        *ptr = uptr[INDEX_REAL]; ptr++;
+        debug_body( "domain: %d, u: %0.16f%, offset: %d", 
+                    dptr->domain_index, uptr[INDEX_REAL], 
+                    dptr->nindex_p[FEM2D_INDEX_V1] );
+
+        /* Get the second vertex */
+        uptr = uptr0 + dptr->nindex_p[FEM2D_INDEX_V2]; 
+        *ptr = uptr[INDEX_REAL]; ptr++;
+        debug_body( "domain: %d, u: %0.16f, offset: %d", 
+                    dptr->domain_index, uptr[INDEX_REAL],
+                    dptr->nindex_p[FEM2D_INDEX_V2]);
+
+        /* Get the third vertex */
+        uptr = uptr0 + dptr->nindex_p[FEM2D_INDEX_V3]; 
+        *ptr = uptr[INDEX_REAL]; ptr++;
+        debug_body( "domain: %d, u: %0.16f, offset: %d", 
+                    dptr->domain_index, uptr[INDEX_REAL],
+                    dptr->nindex_p[FEM2D_INDEX_V3] );
+        
+        error = matlib_xgemv( alpha, vphi_tmp, u1_tmp, beta, u2_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Matrix-vector multiplication failed!");
+  
+        u2_tmp.elem_p = u2_tmp.elem_p + vphi.lenc; 
+
+    }
+    matlib_free(u1_tmp.elem_p);
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+    
+clean_up:
+    if (mcnt==1)
+        matlib_free(u1_tmp.elem_p);
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}/* End of fem2d_xinterp */ 
+
+
+fem2d_err fem2d_zinterp
 (
     const fem2d_ea  ea,
     const matlib_zv u_nodes,
@@ -1241,10 +1363,6 @@ fem2d_err fem2d_interp
                            .lenc  = FEM2D_NV,
                            .elem_p = vphi.elem_p };
 
-
-    matlib_index offset;
-    matlib_index vsize = (matlib_index)sizeof(matlib_real*);
-
     for ( dptr = ea.elem_p; 
           dptr < (ea.len + ea.elem_p); dptr++)
     {
@@ -1290,10 +1408,53 @@ clean_up:
         matlib_free(u1_tmp.elem_p);
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
-}
+
+}/* End of fem2d_zinterp */ 
 
 /*============================================================================*/
-matlib_real fem2d_normL2
+matlib_real fem2d_xnormL2
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes,
+    matlib_xv quadW
+)
+{
+    debug_enter( "nr of domains: %d, "
+                 "nr of nodes: %d, "
+                 "nr of quadrature nodes: %d",
+                 ea.len, ea.nr_nodes, quadW.len);
+    
+    err_check(    (ea.elem_p       == NULL) 
+               || (u_qnodes.elem_p == NULL) 
+               || (quadW.elem_p    == NULL), clean_up,
+               "%s", "Null pointers ecountered!");
+
+    err_check( (u_qnodes.len != quadW.len * ea.len), clean_up, 
+               "%s", "Dimension mis-match!");
+
+    matlib_real* ptr = u_qnodes.elem_p;
+    
+    matlib_real norm = 0;
+    matlib_real jacob;
+
+    for ( matlib_index i = 0; i < ea.len; i++)
+    {
+        jacob = (ea.elem_p[i]).jacob;
+        for (matlib_index j = 0; j< quadW.len; j++, ptr++)
+        {
+            norm += (*ptr * *ptr * quadW.elem_p[j] * jacob);
+        }
+    }
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sqrt(norm);
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+} /* End of fem2d_xnormL2 */ 
+
+matlib_real fem2d_znormL2
 (
     fem2d_ea  ea,
     matlib_zv u_qnodes,
@@ -1332,11 +1493,62 @@ matlib_real fem2d_normL2
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return MATLIB_NAN;
-}
+
+}/* End of fem2d_znormL2 */ 
 
 /*============================================================================*/
+matlib_real fem2d_xiprod 
+/* Inner product iprod = (u, conj(v))_{\Omega} */ 
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes,
+    matlib_xv v_qnodes,
+    matlib_xv quadW
+)
+{
+    debug_enter( "nr of domains: %d, "
+                 "nr of nodes: %d, "
+                 "nr of quadrature nodes: %d",
+                 ea.len, ea.nr_nodes, quadW.len);
+    
+    err_check(    (ea.elem_p       == NULL)    
+               || (u_qnodes.elem_p == NULL) 
+               || (v_qnodes.elem_p == NULL) 
+               || (quadW.elem_p    == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
 
-matlib_real fem2d_iprod 
+    err_check( (u_qnodes.len != v_qnodes.len),
+               clean_up, "Dimension mis-match for field vectors (u: %d, v: %d)!",
+               v_qnodes.len, u_qnodes.len );
+
+    err_check( (v_qnodes.len != quadW.len * ea.len), clean_up, 
+               "%s", "Dimension mis-match!");
+
+    matlib_real* uptr = u_qnodes.elem_p;
+    matlib_real* vptr = v_qnodes.elem_p;
+    
+    matlib_real iprod = 0;
+    matlib_real jacob;
+
+    for ( matlib_index i = 0; i< ea.len; i++)
+    {
+        jacob = (ea.elem_p[i]).jacob;
+        for (matlib_index j = 0; j< quadW.len; j++, uptr++, vptr++)
+        {
+            iprod += (*uptr * *vptr * quadW.elem_p[j] * jacob);
+        }
+    }
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return iprod;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+} /* End of fem2d_xiprod */ 
+
+
+matlib_real fem2d_ziprod 
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
@@ -1383,7 +1595,8 @@ matlib_real fem2d_iprod
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return MATLIB_NAN;
-} /* fem2d_iprod */ 
+
+} /* fem2d_ziprod */ 
 
 /*============================================================================*/
 
@@ -1441,10 +1654,103 @@ clean_up:
     matlib_free(quadP->elem_p);
     debug_exit("Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
-}
-/*============================================================================*/
 
-fem2d_err fem2d_prj
+}/* End of fem2d_quadP */ 
+/*============================================================================*/
+fem2d_err fem2d_xprj
+(
+    fem2d_ea  ea,
+    matlib_xv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_xm quadP,
+    matlib_xv u_prj
+
+)
+{
+    debug_enter( "nr of domains: %d, "
+                 "quadP: %d-by-%d, ",
+                 ea.len, quadP.lenc, quadP.lenr);
+    
+    err_check(   (ea.elem_p        == NULL)    
+               || (u_qnodes.elem_p == NULL) 
+               || (quadP.elem_p    == NULL)  
+               || (u_prj.elem_p    == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_qnodes.len != quadP.lenr * ea.len) 
+               || (quadP.lenc   != FEM2D_NV), clean_up, 
+               "Dimension mis-match (u_qnodes: %d, quadP: %d-by-%d)!",
+               u_qnodes.len, quadP.lenc, quadP.lenr);
+
+    matlib_index INDEX_REAL  = 0;
+
+    matlib_xv u1_tmp = { .len    = quadP.lenr, 
+                         .type   = MATLIB_COL_VECT,
+                         .elem_p = u_qnodes.elem_p };
+
+    matlib_index mcnt = 0;
+    matlib_xv u2_tmp;    
+    fem2d_err error = matlib_create_xv( FEM2D_NV, &u2_tmp, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Memory allocation for projection failed!");
+    mcnt++;
+
+    matlib_real alpha = 1.0;
+    matlib_real beta  = 0.0;
+
+    fem2d_te* dptr; /* domain pointer */
+    matlib_real* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_real* uprj_ptr;
+
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
+    for ( dptr = ea.elem_p; dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        alpha = dptr->jacob;
+        error = matlib_xgemv( alpha, quadP, u1_tmp, beta, u2_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Matrix multiplication failed!");
+        
+        /* Get the first vertex */ 
+        uprj_ptr = uprj_ptr0 + dptr->nindex_p[FEM2D_INDEX_V1]; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V1];
+
+        /* Get the second vertex */ 
+        uprj_ptr = uprj_ptr0 + dptr->nindex_p[FEM2D_INDEX_V2]; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V2];
+
+        /* Get the third vertex */ 
+        uprj_ptr = uprj_ptr0 + dptr->nindex_p[FEM2D_INDEX_V3]; 
+
+        uprj_ptr[INDEX_REAL] += u2_tmp.elem_p[INDEX_REAL + FEM2D_INDEX_V3];
+
+
+        u1_tmp.elem_p = u1_tmp.elem_p + quadP.lenr; 
+    }
+
+
+    matlib_free(u2_tmp.elem_p);
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+
+    if (mcnt == 1)
+        matlib_free(u2_tmp.elem_p);
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2d_xprj */ 
+
+
+fem2d_err fem2d_zprj
 (
     fem2d_ea  ea,
     matlib_zv u_qnodes, /* values at the quadrature nodes */ 
@@ -1457,10 +1763,10 @@ fem2d_err fem2d_prj
                  "quadP: %d-by-%d, ",
                  ea.len, quadP.lenc, quadP.lenr);
     
-    err_check(   (ea.elem_p       == NULL)    
-              || (u_qnodes.elem_p == NULL) 
-              || (quadP.elem_p    == NULL)  
-              || (u_prj.elem_p    == NULL), clean_up, 
+    err_check(    (ea.elem_p       == NULL)    
+               || (u_qnodes.elem_p == NULL) 
+               || (quadP.elem_p    == NULL)  
+               || (u_prj.elem_p    == NULL), clean_up, 
                "%s", "Null pointers ecountered!");
 
     err_check(    (u_qnodes.len != quadP.lenr * ea.len) 
@@ -1493,8 +1799,15 @@ fem2d_err fem2d_prj
     matlib_real* uprj_ptr0 = (matlib_real*)u_prj.elem_p; /* base address */ 
     matlib_real* uprj_ptr;
 
-    for ( dptr = ea.elem_p; 
-          (dptr < (ea.len + ea.elem_p)) && (error != FEM2D_FAILURE); dptr++)
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
+
+    for ( dptr = ea.elem_p; dptr < (ea.len + ea.elem_p); dptr++)
     {
         alpha = dptr->jacob;
         error = matlib_xgemm( alpha, quadP, u1_tmp, beta, u2_tmp );
@@ -1536,15 +1849,15 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 
-} /* End of fem2_prj */ 
+} /* End of fem2d_zprj */ 
 
 /*============================================================================*/
-
-fem2d_err fem2d_LEprj
+fem2d_err fem2d_NB_xprj
+/* Projection from nodal basis representation */ 
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes, /* values at the nodes */ 
-    matlib_zv u_prj
+    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv u_prj
 )
 {
     debug_enter( "nr of domains: %d", ea.len);
@@ -1560,13 +1873,21 @@ fem2d_err fem2d_LEprj
 
     fem2d_te* dptr; /* domain pointer */
     
-    matlib_complex* uptr0     = u_nodes.elem_p; /* base address */ 
-    matlib_complex* uprj_ptr0 = u_prj.elem_p; /* base address */ 
-    matlib_complex* uprj_ptr;
-    matlib_complex* uptr;
+    matlib_real* uptr0     = u_nodes.elem_p; /* base address */ 
+    matlib_real* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_real* uprj_ptr;
+    matlib_real* uptr;
     matlib_index offset1, offset2, offset3;
     matlib_real jacob;
     matlib_complex f1, f2, f3;
+
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
     for ( dptr = ea.elem_p; 
           dptr < (ea.len + ea.elem_p); dptr++)
     {
@@ -1611,10 +1932,162 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 
-} /* End of fem2d_LEprj */ 
+} /* End of fem2d_NB_xprj */ 
+
+
+
+fem2d_err fem2d_NB_zprj
+(
+    fem2d_ea  ea,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_prj
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (u_prj.elem_p   == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check( (u_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, ea.nr_nodes);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_complex* uptr0     = u_nodes.elem_p; /* base address */ 
+    matlib_complex* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_complex* uprj_ptr;
+    matlib_complex* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_complex f1, f2, f3;
+
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
+
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = *uptr * jacob;
+        uptr = uptr0 + offset2; f2 = *uptr * jacob;
+        uptr = uptr0 + offset3; f3 = *uptr * jacob;
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset1;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * f3);
+        
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset2;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * f3);
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset3;
+        
+        (*uprj_ptr) += (   MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V1] * f1
+                         + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V2] * f2
+                         + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * f3);
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2d_NB_zprj */ 
 /*============================================================================*/
 
-matlib_real fem2d_LEnormL2
+matlib_real fem2d_NB_xnormL2
+(
+    fem2d_ea  ea,
+    matlib_xv u_nodes /* values at the nodes */ 
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, v_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, ea.nr_nodes);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_real* uptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_real* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_real f1, f2, f3;
+    matlib_real f11, f12, f13, f23, f22, f33;
+
+    matlib_real sum = 0;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = *uptr;
+        uptr = uptr0 + offset2; f2 = *uptr;
+        uptr = uptr0 + offset3; f3 = *uptr;
+
+        f11 = f1 * f1 * jacob;
+        f22 = f2 * f2 * jacob;
+        f33 = f3 * f3 * jacob;
+
+        f12 = 2 * (f1 * f2) * jacob;
+        f13 = 2 * (f1 * f3) * jacob;
+        f23 = 2 * (f2 * f3) * jacob;
+        
+        sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * f11
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * f22 
+                 + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * f33 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * f12 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * f13 
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * f23 );
+
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sqrt(sum);
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+} /* End of fem2d_NB_xnormL2 */ 
+
+
+matlib_real fem2d_NB_znormL2
 (
     fem2d_ea  ea,
     matlib_zv u_nodes /* values at the nodes */ 
@@ -1629,10 +2102,6 @@ matlib_real fem2d_LEnormL2
     err_check(    (u_nodes.len != ea.nr_nodes), clean_up, 
                "Dimension mis-match (u_nodes: %d, v_nodes: %d, nr nodes: %d)!",
                u_nodes.len, ea.nr_nodes);
-
-
-    matlib_index offset;
-    matlib_index vsize = (matlib_index)2*sizeof(matlib_real*);
 
     fem2d_te* dptr; /* domain pointer */
     
@@ -1659,9 +2128,9 @@ matlib_real fem2d_LEnormL2
         uptr = uptr0 + offset2; f2 = *uptr;
         uptr = uptr0 + offset3; f3 = *uptr;
 
-        f11 = (matlib_real) f1 * conj(f1) * jacob;
-        f22 = (matlib_real) f2 * conj(f2) * jacob;
-        f33 = (matlib_real) f3 * conj(f3) * jacob;
+        f11 = (matlib_real) (f1 * conj(f1) * jacob);
+        f22 = (matlib_real) (f2 * conj(f2) * jacob);
+        f33 = (matlib_real) (f3 * conj(f3) * jacob);
 
         f12 = (matlib_real) (f1 * conj(f2) + f2 * conj(f1)) * jacob;
         f13 = (matlib_real) (f1 * conj(f3) + f3 * conj(f1)) * jacob;
@@ -1683,10 +2152,85 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return MATLIB_NAN;
 
-} /* End of fem2d_LEnormL2 */ 
+} /* End of fem2d_NB_znormL2 */ 
 /*============================================================================*/
+matlib_real fem2d_NB_xiprod
+(
+    fem2d_ea  ea,
+    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv v_nodes
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (v_nodes.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
 
-matlib_complex fem2d_LEiprod
+    err_check(    (u_nodes.len != ea.nr_nodes) 
+               || (v_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, v_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, v_nodes.len, ea.nr_nodes);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_real* uptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_real* vptr0 = v_nodes.elem_p; /* base address */ 
+    matlib_real* uptr;
+    matlib_real* vptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_real f1, f2, f3;
+    matlib_real g1, g2, g3;
+    matlib_real fg11, fg22, fg33, fg12, fg13, fg23;
+
+    matlib_real sum = 0;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = *uptr;
+        uptr = uptr0 + offset2; f2 = *uptr;
+        uptr = uptr0 + offset3; f3 = *uptr;
+
+        vptr = vptr0 + offset1; g1 = *vptr;
+        vptr = vptr0 + offset2; g2 = *vptr;
+        vptr = vptr0 + offset3; g3 = *vptr;
+
+        fg11 = f1 * g1 * jacob;
+        fg22 = f2 * g2 * jacob;
+        fg33 = f3 * g3 * jacob;
+
+        fg12 = (f1 * g2 + f2 * g1) * jacob;
+        fg13 = (f1 * f3 + f3 * g1) * jacob;
+        fg23 = (f2 * g3 + f3 * g2) * jacob;
+        
+        sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * fg11
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * fg22 
+                 + MEMI[FEM2D_INDEX_V3][FEM2D_INDEX_V3] * fg33 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2] * fg12 
+                 + MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V3] * fg13 
+                 + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V3] * fg23 );
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sum;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+}/* End of fem2d_NB_xiprod */ 
+
+matlib_complex fem2d_NB_ziprod
 (
     fem2d_ea  ea,
     matlib_zv u_nodes, /* values at the nodes */ 
@@ -1741,9 +2285,9 @@ matlib_complex fem2d_LEiprod
         fg22 = f2 * conj(g2) * jacob;
         fg33 = f3 * conj(g3) * jacob;
 
-        fg12 = (matlib_real) (f1 * conj(g2) + f2 * conj(g1)) * jacob;
-        fg13 = (matlib_real) (f1 * conj(f3) + f3 * conj(g1)) * jacob;
-        fg23 = (matlib_real) (f2 * conj(g3) + f3 * conj(g2)) * jacob;
+        fg12 = (f1 * conj(g2) + f2 * conj(g1)) * jacob;
+        fg13 = (f1 * conj(f3) + f3 * conj(g1)) * jacob;
+        fg23 = (f2 * conj(g3) + f3 * conj(g2)) * jacob;
         
         sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * fg11
                  + MEMI[FEM2D_INDEX_V2][FEM2D_INDEX_V2] * fg22 
@@ -1759,7 +2303,9 @@ matlib_complex fem2d_LEiprod
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return MATLIB_NAN;
-}
+
+}/* End of fem2d_NB_ziprod */ 
+
 /*============================================================================*/
 fem2d_err fem2d_quadM
 (
@@ -2093,7 +2639,7 @@ fem2d_err fem2d_GMMSparsity
             if(node_order > 0)
             {
                 j = ea.vpatch_p[i].len - 1;
-                debug_body("%s", "Boundary point encountered!");
+                debug_body("Boundary point encountered (j: %d)!", j);
                 other_vertex1 = (ea.vpatch_p[i].vert_index[j] + 1) % FEM2D_NV;
                 other_vertex2 = (ea.vpatch_p[i].vert_index[j] + 2) % FEM2D_NV;
 
@@ -2126,108 +2672,170 @@ fem2d_err fem2d_XCSRGMM
     matlib_real*  ugpmm                   
 )
 {
-    debug_enter("nr nodes: %d, q: %d", ea.nr_nodes, q.len);
+    debug_enter("nr nodes: %d, q: %d", ea.len, q.len);
 
-    err_check((ea.elem_p    == NULL) 
-            || (ea.vpatch_p == NULL)
-            || (q.elem_p    == NULL), clean_up, 
-            "%s", "Null pointer(s) encountered!");
+    err_check(    (ea.elem_p   == NULL) 
+               || (ea.vpatch_p == NULL)
+               || (q.elem_p    == NULL), clean_up, 
+               "%s", "Null pointer(s) encountered!");
+
+    err_check( ea.len * FEM2D_NR_COMBI != q.len, clean_up,
+               "%s: Dimension mistmatch (q: %d, required size: %d)!",
+               q.len, ea.len * FEM2D_NR_COMBI);
 
     fem2d_te* dptr;
     matlib_real* qptr = q.elem_p;
     
-    matlib_index i, j, other_vertex, node_index;
+    matlib_index i, pos_vpatch, other_vertex, node_index;
+    matlib_int j;
 
+    matlib_index* iter = calloc(row[ea.nr_nodes], sizeof(matlib_index));
+
+    for (i = 0; i < row[ea.nr_nodes]; i++ )
+    {
+        ugpmm[i] = 0.0;
+        iter[i]  = 0;
+    }
     for ( dptr = ea.elem_p; dptr < ea.elem_p + ea.len;
           dptr++, qptr += FEM2D_NR_COMBI)
     {
+        debug_body("Domain: %d", dptr->domain_index);
+
         node_index = dptr->nindex_p[FEM2D_INDEX_V1];
+
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V11];
+        iter[i] ++;
+        
+        pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V1];
+        debug_body( "node: %d, pos in vertex patch: %d",
+                    node_index, pos_vpatch);
 
-        j = ea.vpatch_p[i].node_order[dptr->pos_vpatch];
-        other_vertex = ea.vpatch_p[i].bvert_index[dptr->pos_vpatch];
+        j = ea.vpatch_p[node_index].node_order[pos_vpatch];
+        err_check( j < 0, clean_up, 
+                   "Node ordering might be inconsistent (node order: %d)!", j);
+        debug_body("offset from diagonal in sparse array: %d", j);
+        other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
+        err_check( FEM2D_INDEX_V1 != ea.vpatch_p[node_index].vert_index[pos_vpatch], 
+                   clean_up, "%s", "Wrong vertex index encountered!");
 
         if (other_vertex == FEM2D_INDEX_V2)
         {
             ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            iter[i+j] ++;
 
-            if (ea.vpatch_p[i].point_enum == FEM2D_INTERIOR)
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
             {
-                if (dptr->pos_vpatch < (ea.vpatch_p[i].len - 1))
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
                 {
-                    j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
                 }
                 else
                 {
-                    j = ea.vpatch_p[i].node_order[0];
+                    j = ea.vpatch_p[node_index].node_order[0];
                 }
             }
             else
             {
-                j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
             }
+            err_check( j < 1, clean_up, 
+                       "Node ordering might be inconsistent (node order: %d)!", j);
+            debug_body( "offset from diagonal in sparse array: %d", j);
             ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            iter[i+j] ++;
         }
         else
         {
             ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            iter[i+j] ++;
 
-            if (ea.vpatch_p[i].point_enum == FEM2D_INTERIOR)
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
             {
-                if (dptr->pos_vpatch < (ea.vpatch_p[i].len - 1))
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
                 {
-                    j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
                 }
                 else
                 {
-                    j = ea.vpatch_p[i].node_order[0];
+                    j = ea.vpatch_p[node_index].node_order[0];
                 }
             }
             else
             {
-                j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
             }
+            debug_body( "offset from diagonal in sparse array: %d", j);
+            err_check( j < 1, clean_up, 
+                       "Node ordering might be inconsistent (node order: %d)!", j);
             ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            iter[i+j] ++;
         }
 
         /* ======= */ 
         node_index = dptr->nindex_p[FEM2D_INDEX_V2];
+
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V22];
+        iter[i] ++;
 
-        other_vertex = ea.vpatch_p[i].bvert_index[dptr->pos_vpatch];
+        pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V2];
+        debug_body( "node: %d, pos in vertex patch: %d",
+                    node_index, pos_vpatch);
+
+        other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
+        err_check( FEM2D_INDEX_V2 != ea.vpatch_p[node_index].vert_index[pos_vpatch], 
+                   clean_up, "%s", "Wrong vertex index encountered!");
 
         if (other_vertex == FEM2D_INDEX_V3)
         {
-            j = ea.vpatch_p[i].node_order[dptr->pos_vpatch];
+            j = ea.vpatch_p[node_index].node_order[pos_vpatch];
         }
         else
         {
-            if (ea.vpatch_p[i].point_enum == FEM2D_INTERIOR)
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
             {
-                if (dptr->pos_vpatch < (ea.vpatch_p[i].len - 1))
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
                 {
-                    j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
                 }
                 else
                 {
-                    j = ea.vpatch_p[i].node_order[0];
+                    j = ea.vpatch_p[node_index].node_order[0];
                 }
             }
             else
             {
-                j = ea.vpatch_p[i].node_order[dptr->pos_vpatch + 1];
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
             }
         }
+        err_check( j < 1, clean_up, 
+                   "Node ordering might be inconsistent (node order: %d)!", j);
+        debug_body("offset from diagonal in sparse array: %d", j);
         ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
+        iter[i+j] ++;
 
         /* ======= */ 
         node_index = dptr->nindex_p[FEM2D_INDEX_V3];
+        debug_body( "node: %d", node_index);
+
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V33];
+        iter[i] ++;
     }
-    
+
+    for (i = 0; i < ea.nr_nodes; i++ )
+    {
+        for (j = row[i]; j < row[i+1]; j++ )
+        {
+            debug_print( "iter[%d][%d]: %d (%s X %s)",
+                         i, col[j], iter[j], 
+                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[i].point_enum),
+                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[col[j]].point_enum));
+        }
+    }
+    matlib_free(iter);
+
     debug_exit("Exit Status: %s", "SUCCESS" );
     return FEM2D_SUCCESS;
 
@@ -2237,9 +2845,94 @@ clean_up:
 
 
 }
+
+
+fem2d_err fem2d_XCSRGMM1
+(
+    fem2d_ea      ea,
+    matlib_index* row,                     
+    matlib_index* col,                     
+    matlib_real*  ugpmm                   
+)
+{
+    debug_enter("nr nodes: %d", ea.len);
+
+    err_check(    (ea.elem_p   == NULL) 
+               || (ea.vpatch_p == NULL), clean_up,
+            "%s", "Null pointer(s) encountered!");
+
+    matlib_index i, j, k;
+    matlib_int node_order;
+    matlib_real jacob;
+
+    for (i = 0; i < row[ea.nr_nodes]; i++ )
+    {
+        ugpmm[i] = 0;
+    }
+    
+    for (i = 0; i < ea.nr_nodes; i++)
+    {
+        k = row[i];
+        for (j = 0; j < ea.vpatch_p[i].len - 1; j++)
+        {
+            jacob = ea.vpatch_p[i].domain_p[j]->jacob;
+            ugpmm[k] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1];
+
+            node_order = ea.vpatch_p[i].node_order[j];
+            if (node_order>0)
+            {
+                ugpmm[k + node_order] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+            node_order = ea.vpatch_p[i].node_order[j+1];
+            if (node_order>0)
+            {
+                ugpmm[k + node_order] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+            debug_print( "k+node_order: %d, next row: %d",
+                         k + node_order, row[i+1]);
+        }
+        jacob = ea.vpatch_p[i].domain_p[j]->jacob;
+        ugpmm[k] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1];
+
+        node_order = ea.vpatch_p[i].node_order[j];
+        if (ea.vpatch_p[i].point_enum == FEM2D_INTERIOR)
+        {
+            if(node_order > 0)
+            {
+                ugpmm[k + node_order ] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+            node_order = ea.vpatch_p[i].node_order[0];
+            if (node_order > 0)
+            {
+                ugpmm[k + node_order] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+        }
+        else
+        {
+            if (node_order > 0)
+            {
+                ugpmm[k + node_order] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+            node_order = ea.vpatch_p[i].node_order[j+1];
+            if (node_order > 0)
+            {
+                ugpmm[k + node_order] += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V2];
+            }
+        }
+    }
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+
+}
+
 /*============================================================================*/
 #if 1
-fem2d_err fem1d_xm_sparse_GMM
+fem2d_err fem2d_xm_sparse_GMM
 /* Real - Assemble Global Mass Matrix*/ 
 (
     fem2d_ea          ea,
@@ -2252,20 +2945,24 @@ fem2d_err fem1d_xm_sparse_GMM
                  "length of phi: %d",
                  Q.lenc, Q.lenr, phi.len);
     
-    err_check( (Q.lenr * ea.nr_nodes != phi.len), clean_up,
+    err_check( Q.lenr != FEM2D_NR_COMBI, clean_up,
+               "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
+               Q.lenc, Q.lenr, FEM2D_NR_COMBI);
+
+    err_check( (Q.lenr * ea.len != phi.len), clean_up,
                "Dimension mismatch (phi: %d, require size: %d)!", 
                phi.len, Q.lenc * ea.nr_nodes);
 
     matlib_index nnz = fem2d_get_nnz(ea);
     debug_body( "nr. of non-zero elements: %d", nnz);
     err_check( nnz == 0, clean_up, "%s", 
-               "Number of non-zero elements of the mass-matrix is inconsisted!");
+               "Number of non-zero elements of the mass-matrix is inconsistent!");
 
     matlib_index i, mcnt = 0;
     fem2d_err error;
     
     matlib_xv q;
-    error = matlib_create_xv( Q.lenc * ea.nr_nodes, &q, MATLIB_COL_VECT);
+    error = matlib_create_xv( Q.lenc * ea.len, &q, MATLIB_COL_VECT);
     err_check( (error == FEM2D_FAILURE), clean_up, 
                "%s", "Failed to allocate memory for the inner product array!");
     mcnt++; /* 1 */ 
@@ -2273,16 +2970,17 @@ fem2d_err fem1d_xm_sparse_GMM
     phi.len = Q.lenr;
 
     matlib_xv q_tmp = { .len = Q.lenc, 
-                        .type = MATLIB_COL_VECT};
+                        .type = MATLIB_COL_VECT,
+                        .elem_p = q.elem_p};
 
     for ( i = 0; i < ea.len; 
           i++, (phi.elem_p) += (Q.lenr), (q_tmp.elem_p) += (Q.lenc))
     {
         alpha = ea.elem_p[i].jacob;
         error = matlib_xgemv(alpha, Q, phi, beta, q_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Failed to compute inner-products!");
     }
-    err_check( (error == FEM2D_FAILURE), clean_up, 
-               "%s", "Failed to compute inner-products!");
     
     M->lenc   = ea.nr_nodes;
     M->lenr   = ea.nr_nodes;
@@ -2340,6 +3038,74 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 
+}
+
+fem2d_err fem2d_xm_sparse_GMM1
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
+    matlib_xm_sparse* M
+)
+{
+    debug_enter("", "%s");
+
+    matlib_index nnz = fem2d_get_nnz(ea);
+    debug_body( "nr. of non-zero elements: %d", nnz);
+    err_check( nnz == 0, clean_up, "%s", 
+               "Number of non-zero elements of the mass-matrix is inconsistent!");
+
+    matlib_index i, mcnt = 0;
+    fem2d_err error;
+    
+    
+    M->lenc   = ea.nr_nodes;
+    M->lenr   = ea.nr_nodes;
+    
+    M->rowIn  = calloc( ea.nr_nodes + 1, sizeof(matlib_index));
+    err_check( (M->rowIn == NULL), clean_up, 
+               "%s", "Failed to allocate memory for the row array!");
+    mcnt++; /* 1 */ 
+
+    M->colIn  = calloc( nnz, sizeof(matlib_index));
+    err_check( (M->colIn == NULL), clean_up,
+               "%s", "Failed to allocate memory for the column array!");
+    mcnt++; /* 2 */ 
+    
+    M->elem_p = calloc( nnz, sizeof(matlib_real));
+    err_check( (M->elem_p == NULL), clean_up,
+               "%s", "Failed to allocate memory for the sparse matrix entries!");
+    mcnt++; /* 3 */ 
+
+
+    error = fem2d_GMMSparsity( ea, M->rowIn, M->colIn);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to get the sparsity structure of the mass-matrix!");
+
+    error = fem2d_XCSRGMM1( ea, M->rowIn, M->colIn, M->elem_p);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to compute the mass-matrix!");
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt == 3)
+    {
+        matlib_free(M->elem_p);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(M->colIn);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(M->rowIn);
+        mcnt--;
+    }
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
 }
 #endif
 

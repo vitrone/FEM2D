@@ -44,6 +44,28 @@
 /*============================================================================+/
  |Allocation of memory
 /+============================================================================*/
+matlib_err matlib_create_nv
+(
+    matlib_index length,
+    matlib_nv*   v
+)
+{
+    v->len  = length;
+    errno = 0;
+    v->elem_p = calloc( length, sizeof(matlib_int));
+    err_check( (v->elem_p == NULL), clean_up, 
+               "%s: Memory allocation for integer vector of length %d failed!", 
+               strerror(errno), length);
+    
+    debug_exit("Exit Status: %s", "SUCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+
+}
+
 
 matlib_err matlib_create_zv
 (
@@ -419,8 +441,10 @@ matlib_err matlib_xgemv
     debug_enter("%s", "");
 
     /* check if the input has NULL poindexers */
-    err_check( (((A.elem_p == NULL) || (u.elem_p == NULL)) || (v.elem_p == NULL)),
-               clean_up, "%s", "Null pointers encountered!");
+    err_check(    (A.elem_p == NULL) 
+               || (u.elem_p == NULL) 
+               || (v.elem_p == NULL), clean_up, 
+               "%s", "Null pointer(s) encountered!");
     
     matlib_index incu = 1;
     matlib_index incv = 1;
@@ -445,7 +469,8 @@ matlib_err matlib_xgemv
         order_OK   = true;
     }
     err_check( !order_OK, clean_up, 
-               "Order of the matrix unknown (order: %d)!", A.order);
+               "Order of the matrix unknown (order: %s)!",
+               MATLIB_ORDER_ENUM2STR(A.order));
     
     /* Check if the dimension is okay! */ 
     _CBLAS_OP op_enum;
@@ -462,9 +487,9 @@ matlib_err matlib_xgemv
     }
     err_check( !dim_OK, clean_up, 
                "Dimension mis-match in computing v <- alpha op(A) * u + beta * u"
-               "(A: %d-by-%d, op(A): %d, "
+               "(A: %d-by-%d, op(A): %s, "
                "u: %d-by-1, v: %d-by-1)!",
-               A.lenc, A.lenr, A.op, 
+               A.lenc, A.lenr, MATLIB_OP_ENUM2STR(A.op), 
                u.len, v.len );
 
     cblas_dgemv( order_enum, 
@@ -507,8 +532,10 @@ matlib_err matlib_zgemv
     debug_enter("%s", "");
 
     /* check if the input has NULL poindexers */
-    err_check( (((A.elem_p == NULL) || (u.elem_p == NULL)) || (v.elem_p == NULL)),
-               clean_up, "%s", "Null pointers encountered!");
+    err_check(    (A.elem_p == NULL) 
+               || (u.elem_p == NULL) 
+               || (v.elem_p == NULL), clean_up, 
+               "%s", "Null pointer(s) encountered!");
     
     matlib_index incu = 1;
     matlib_index incv = 1;
@@ -532,7 +559,8 @@ matlib_err matlib_zgemv
         order_OK   = true;
     }
     err_check( !order_OK, clean_up, 
-               "Order of the matrix unknown (order: %d)!", A.order);
+               "Order of the matrix unknown (order: %s)!",
+               MATLIB_ORDER_ENUM2STR(A.order));
 
     _CBLAS_OP op_enum;
 
@@ -555,8 +583,8 @@ matlib_err matlib_zgemv
     }
     err_check( !dim_OK, clean_up, 
                "Dimension mis-match in computing v <- alpha op(A) * u + beta * u"
-               "(A: %d-by-%d, op(A): %d, u: %d-by-1, v: %d-by-1)!",
-               A.lenc, A.lenr, A.op, 
+               "(A: %d-by-%d, op(A): %s, u: %d-by-1, v: %d-by-1)!",
+               A.lenc, A.lenr, MATLIB_OP_ENUM2STR(A.op), 
                u.len, v.len );
 
     debug_body( "alpha: % 0.16f%+0.16fi "

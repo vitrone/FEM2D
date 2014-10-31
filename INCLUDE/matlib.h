@@ -81,6 +81,7 @@ typedef enum
 
 typedef enum
 {
+    MATLIB_OP_UNKNOWN,
     MATLIB_NO_TRANS,
     MATLIB_TRANS,
     MATLIB_CONJ_TRANS
@@ -110,6 +111,7 @@ typedef enum
  * */ 
 typedef enum
 {
+    MATLIB_ORDER_UNKNOWN,
     MATLIB_COL_MAJOR, 
     MATLIB_ROW_MAJOR 
 
@@ -135,6 +137,13 @@ typedef struct
 
 typedef struct
 {
+    matlib_index len;
+    matlib_int*  elem_p;
+
+} matlib_nv;
+
+typedef struct
+{
     matlib_index    len;
     MATLIB_VECT_T   type;
     matlib_complex* elem_p;
@@ -154,6 +163,15 @@ typedef struct
     matlib_real* elem_p;
 
 } matlib_xm;
+
+typedef struct
+{
+    matlib_index lenc; /* length of columns */ 
+    matlib_index lenr; /* length of rows    */ 
+    MATLIB_ORDER order;
+    matlib_index* elem_p;
+
+} matlib_nm;
 
 typedef struct
 {
@@ -270,6 +288,24 @@ typedef struct
          }                                                               \
     } while (0)           
 
+#define DEBUG_PRINT_NV(NAME, fmt,...)                                    \
+    do {                                                                 \
+         if(_TRACE_DATA){                                                \
+            matlib_index NAME ## _i;                                     \
+            for((NAME ## _i)=0;                                          \
+                (NAME ## _i)<(NAME.len);                                 \
+                (NAME ##_i)++){                                          \
+                fprintf( stderr,                                         \
+                         "%s:%d:%s: -(" fmt #NAME "[%d] = % d)\n",       \
+                         __FILE__,                                       \
+                         __LINE__,                                       \
+                         __func__,                                       \
+                        __VA_ARGS__,                                     \
+                        NAME ## _i,                                      \
+                        *((NAME.elem_p)+(NAME ## _i)));                  \
+            }                                                            \
+         }                                                               \
+    } while (0)           
 /* For complex Vectors */ 
 #define DEBUG_PRINT_ZV(NAME, fmt,...)                                    \
     do {                                                                 \
@@ -372,13 +408,25 @@ typedef struct
  * V = MK_VM(B);
  *
  * */ 
-#define MK_VM(B) { .len  = B.lenc * B.lenr,                             \
-                   .type = MATLIB_COL_VECT,                             \
+#define MK_VM(B) { .len  = B.lenc * B.lenr,\
+                   .type = MATLIB_COL_VECT,\
                    .elem_p = B.elem_p }
  
+#define MATLIB_M2V(M, V)          \
+    do {                          \
+        V.len = (M.lenc * M.lenr);\
+        V.elem_p = M.elem_p;      \
+    } while (0)
+
+
 /*============================================================================+/
  |Allocation of memory
 /+============================================================================*/
+matlib_err matlib_create_nv
+(
+    matlib_index length,
+    matlib_nv*   v
+);
 matlib_err matlib_create_zv
 (
     matlib_index  length,
@@ -515,6 +563,216 @@ matlib_err matlib_zgemm
 /*============================================================================+/
  | IO functions for vectors and matrices
 /+============================================================================*/
+
+typedef enum
+{
+    MATLIB_FORMAT_UNKNOWN,
+    MATLIB_XV,
+    MATLIB_ZV,
+    MATLIB_DEN_XM, 
+    MATLIB_DEN_ZM,
+    MATLIB_NV,
+    MATLIB_CSR_XM,
+    MATLIB_CSR_ZM,
+    MATLIB_CSC_XM,
+    MATLIB_CSC_ZM,
+    MATLIB_COO_XM,
+    MATLIB_COO_ZM,
+    MATLIB_DIA_XM,
+    MATLIB_DIA_ZM
+
+} MATLIB_IO_FORMAT;
+
+
+typedef struct
+{
+    matlib_index      len;    /* length of the data array*/ 
+    void**            data_p; /* array data */ 
+    MATLIB_IO_FORMAT* format; /* array of formats */ 
+    size_t*           size;
+
+} matlib_io_t;
+
+
+#define MATLIB_INDEX_SIZE   (sizeof(matlib_index))
+#define MATLIB_REAL_SIZE    (sizeof(matlib_real))
+#define MATLIB_INT_SIZE     (sizeof(matlib_int))
+#define MATLIB_COMPLEX_SIZE (sizeof(matlib_complex))
+#define MATLIB_ENUM_SIZE    (sizeof(char))
+
+matlib_err matlib_io_create(matlib_index len, matlib_io_t* mp);
+matlib_err matlib_io_size(matlib_io_t* mp);
+
+char         matlib_io_order_char(MATLIB_ORDER order_enum);
+MATLIB_ORDER matlib_io_order_enum(char orderc);
+
+char         matlib_io_op_char(MATLIB_OP op_enum);
+MATLIB_OP    matlib_io_op_enum(char opc);
+
+char         matlib_io_format_char(MATLIB_IO_FORMAT format_enum);
+MATLIB_IO_FORMAT matlib_io_format_enum(char formatc);
+
+matlib_err matlib_io_xv_write
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_zv_write
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_xm_write
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_zm_write
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_fwrite
+(
+    matlib_io_t* mp,
+    char* file_name
+);
+
+/*============================================================================*/
+
+matlib_err matlib_io_xv_read
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_zv_read
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_xm_read
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_zm_read
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp
+);
+
+matlib_err matlib_io_getinfo
+(
+    matlib_io_t* mp,
+    FILE* fp
+);
+
+matlib_err matlib_io_getelem
+(
+    matlib_io_t* mp,
+    matlib_index data_index,
+    FILE* fp
+);
+
+matlib_err matlib_io_fread
+(
+    matlib_io_t* mp,
+    char* file_name
+);
+
+matlib_err matlib_io_elemfree
+(
+    matlib_io_t* mp,
+    matlib_index data_index
+);
+matlib_err matlib_io_free(matlib_io_t* mp);
+matlib_err matlib_io_freeall(matlib_io_t* mp);
+/*============================================================================*/
+/* Routines for MATLAB */
+
+matlib_err matlib_io_nv_extread
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp,
+    matlib_err (*create)(matlib_index, matlib_nv *, void*),
+    void (*destroy)(void*),
+    void* extdata_p
+);
+
+matlib_err matlib_io_xv_extread
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp,
+    matlib_err (*create)( matlib_index, 
+                          matlib_xv *, 
+                          MATLIB_VECT_T, 
+                          void*),
+    void (*destroy)(void*),
+    void* extdata_p
+);
+
+matlib_err matlib_io_zv_extread
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp,
+    matlib_err (*create)( matlib_index, 
+                          matlib_zv *, 
+                          MATLIB_VECT_T, 
+                          void*),
+    void (*destroy)(void*),
+    void* extdata_p
+);
+
+matlib_err matlib_io_xm_extread
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp,
+    matlib_err (*create)( matlib_index,
+                          matlib_index, 
+                          matlib_xm *, 
+                          MATLIB_ORDER, 
+                          MATLIB_OP, 
+                          void*),
+    void (*destroy)(void*),
+    void* extdata_p
+);
+
+matlib_err matlib_io_zm_extread
+(
+    matlib_io_t* mp, 
+    matlib_index data_index, 
+    FILE* fp,
+    matlib_err (*create)( matlib_index,
+                          matlib_index, 
+                          matlib_zm *, 
+                          MATLIB_ORDER, 
+                          MATLIB_OP, 
+                          void*),
+    void (*destroy)(void*),
+    void* extdata_p
+);
+
+/*============================================================================*/
+
 
 void matlib_xmwrite_csv(char* file_name, matlib_xm M);
 void matlib_zmwrite_csv(char* file_name, matlib_zm M);

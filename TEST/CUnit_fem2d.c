@@ -6,6 +6,9 @@
 #include <string.h>
 #include <errno.h>
 #include "mkl.h"
+#include "mkl_types.h"
+#include "mkl_spblas.h"
+
 
 
 //#define NDEBUG
@@ -641,6 +644,171 @@ void sort_vertices
 
 
 /*============================================================================*/
+static bool check_te(fem2d_te* dptr, fem2d_cc* nptr)
+{
+    /* check order of the vertices */
+    matlib_index ind_v1 = dptr->nindex_p[FEM2D_INDEX_V1];
+    matlib_index ind_v2 = dptr->nindex_p[FEM2D_INDEX_V2];
+    matlib_index ind_v3 = dptr->nindex_p[FEM2D_INDEX_V3];
+    debug_body( "vertex indices of the triangular "
+                "element[%d] (in order): %d, %d, %d", dptr->domain_index,
+                ind_v1, ind_v2, ind_v3);
+    bool is_order_OK = (ind_v1 < ind_v2) && (ind_v2 < ind_v3);
+
+    /* Check vertex pointers */ 
+    matlib_real* v1_ptr = dptr->vert_p[FEM2D_INDEX_V1];
+    matlib_real* v2_ptr = dptr->vert_p[FEM2D_INDEX_V2];
+    matlib_real* v3_ptr = dptr->vert_p[FEM2D_INDEX_V3];
+
+    matlib_real* nv1_ptr = nptr->elem_p + FEM2D_DIM * ind_v1;
+    matlib_real* nv2_ptr = nptr->elem_p + FEM2D_DIM * ind_v2;
+    matlib_real* nv3_ptr = nptr->elem_p + FEM2D_DIM * ind_v3;
+
+    bool is_pointer_OK =    (v1_ptr == nv1_ptr) 
+                         && (v2_ptr == nv2_ptr) 
+                         && (v3_ptr == nv3_ptr);
+
+    debug_body( "vertex pointers are okay?: %s",
+                is_pointer_OK ? "TRUE": "FALSE" );
+    return (is_order_OK && is_pointer_OK);
+}
+
+
+static bool check_vp(fem2d_vp* vp_ptr)
+{
+
+    debug_enter( "Node: %d, point type: %s, patch length: %d",
+                 vp_ptr->node_index,
+                 FEM2D_POINT_T_ENUM2STR(vp_ptr->point_enum), 
+                 vp_ptr->len);
+
+    matlib_index i, j, pos_vpatch, nr_edges = 2; 
+    
+    matlib_index mlength = FEM2D_DIM * nr_edges * vp_ptr->len;
+    matlib_real* edge_mid_point = calloc(mlength, sizeof(matlib_real));
+
+    matlib_index *bd_nodes, bd_nodes_len;
+
+    if (vp_ptr->point_enum == FEM2D_INTERIOR)
+    {
+        bd_nodes     = calloc(vp_ptr->len + 1, sizeof(matlib_index));
+        bd_nodes_len = vp_ptr->len + 1;
+    }
+    else
+    {
+        bd_nodes     = calloc(vp_ptr->len + 2, sizeof(matlib_index));
+        bd_nodes_len = vp_ptr->len + 2;
+    }
+
+    matlib_real* mptr = edge_mid_point;
+    matlib_real *v1, *v2, *v3;
+    fem2d_te* dptr;
+    matlib_index nnodes; /* Number of negative nodes */ 
+    
+    /* Check if the common segments have same midpoints as computed in each
+     * neighbouring domain.
+     * */
+    bool is_pos_OK1, is_pos_OK = true;
+
+    for ( j = 0; j < vp_ptr->len; j++)
+    {
+        dptr = vp_ptr->domain_p[j];
+        v1 = *(dptr->vert_p + vp_ptr->vert_index[j]);
+        v2 = *(dptr->vert_p + vp_ptr->bvert_index[j]);
+        v3 = *(dptr->vert_p + 
+              (FEM2D_NV - vp_ptr->bvert_index[j] - vp_ptr->vert_index[j]));
+        
+        mptr[FEM2D_INDEX_DIM1] = 0.5 * (v1[FEM2D_INDEX_DIM1] + v2[FEM2D_INDEX_DIM1]);
+        mptr[FEM2D_INDEX_DIM2] = 0.5 * (v1[FEM2D_INDEX_DIM2] + v2[FEM2D_INDEX_DIM2]);
+
+        mptr += FEM2D_DIM;
+        mptr[FEM2D_INDEX_DIM1] = 0.5 * (v1[FEM2D_INDEX_DIM1] + v3[FEM2D_INDEX_DIM1]);
+        mptr[FEM2D_INDEX_DIM2] = 0.5 * (v1[FEM2D_INDEX_DIM2] + v3[FEM2D_INDEX_DIM2]);
+        mptr += FEM2D_DIM;
+
+        /* check pos_vpatch */
+        pos_vpatch = dptr->pos_vpatch[vp_ptr->vert_index[j]];
+        is_pos_OK1 = (pos_vpatch == j);
+        is_pos_OK  = (is_pos_OK1 && is_pos_OK);
+        debug_body( "j: %d, pos: %d", j, pos_vpatch);
+
+        /* Count negative nodes */
+        if (vp_ptr->node_order[j]<0)
+            nnodes++;
+
+    }
+    if (vp_ptr->point_enum == FEM2D_BOUNDARY)
+    {
+        if (vp_ptr->node_order[j]<0)
+            nnodes++;
+    }
+    debug_body("Number of negative nodes: %d", nnodes);
+    
+    matlib_real err = 0, err1;
+    mptr = edge_mid_point;
+    
+    for ( j = 0; j < vp_ptr->len-1; j++)
+    {
+        mptr += FEM2D_DIM;
+        err1 = sqrt(   pow(fabs(mptr[FEM2D_INDEX_DIM1] - mptr[FEM2D_DIM + FEM2D_INDEX_DIM1]), 2) 
+                     + pow(fabs(mptr[FEM2D_INDEX_DIM2] - mptr[FEM2D_DIM + FEM2D_INDEX_DIM2]), 2));
+        mptr += FEM2D_DIM;
+        err += err1; 
+        debug_body( "j: %d, err: %0.16f", j, err1);
+    }
+    
+    matlib_real *first_edge, *last_edge; 
+    if(vp_ptr->point_enum == FEM2D_INTERIOR)
+    {
+        first_edge = edge_mid_point;
+        last_edge  =  edge_mid_point + mlength - FEM2D_DIM;
+
+        err1 = sqrt(   pow(fabs(first_edge[FEM2D_INDEX_DIM1] - last_edge[FEM2D_INDEX_DIM1]), 2) 
+                     + pow(fabs(first_edge[FEM2D_INDEX_DIM2] - last_edge[FEM2D_INDEX_DIM2]), 2));
+        err += err1; 
+        debug_body( "j: %d, err: %0.16f", j, err1);
+    }
+    debug_body( "Node: %d, err: %0.16f", vp_ptr->node_index, err);
+    bool is_nbhd_OK = (err < TOL);
+
+    matlib_free(edge_mid_point);
+    
+    /* Testing order of the boundary nodes of the vertex patch 
+     * */ 
+    matlib_index* zeroth = bd_nodes + nnodes;
+    *zeroth = vp_ptr->node_index;
+
+    for ( j = 0; j < vp_ptr->len; j++)
+    {
+        dptr = vp_ptr->domain_p[j];
+        *(zeroth + vp_ptr->node_order[j]) = dptr->nindex_p[vp_ptr->bvert_index[j]];
+    }
+    if (vp_ptr->point_enum == FEM2D_BOUNDARY)
+    {
+        matlib_index index = (FEM2D_NV - vp_ptr->bvert_index[j-1] - vp_ptr->vert_index[j-1]);
+        *(zeroth + vp_ptr->node_order[j]) = dptr->nindex_p[index];
+    }
+   
+    bool is_order_OK = true, is_order_OK1;
+
+    matlib_index last = bd_nodes[0];
+    debug_body("boundary nodes[%d]: %d", 0, bd_nodes[0]);
+
+    for (j = 1; j < bd_nodes_len; j++)
+    {
+        debug_body("boundary nodes[%d]: %d", j, bd_nodes[j]);
+        
+        is_order_OK1 = (last < bd_nodes[j]);
+        is_order_OK  = (is_order_OK1 && is_order_OK1);
+        
+        debug_body("is order okay? %s", is_order_OK1 ? "TRUE": "FALSE");
+        last = bd_nodes[j];
+    }
+
+    matlib_free(bd_nodes);
+
+    return (is_pos_OK && is_nbhd_OK && is_order_OK);
+}
 
 void test_create_ea(void)
 {
@@ -655,11 +823,16 @@ void test_create_ea(void)
     sort_vertices(ia, sia);
     matlib_index const *pia = sia;
     matlib_real e_relative, x1, xx1, x2, xx2;
+    bool is_order_OK;
 
     for ( dptr = ea.elem_p; 
           dptr < (ea.len + ea.elem_p); 
           dptr++, pia +=3)
     {
+
+        is_order_OK = check_te(dptr, (fem2d_cc*)&nodes);
+        CU_ASSERT_TRUE(is_order_OK);
+
         /* Get the first vertex */ 
         vptr = *(dptr->vert_p);
         
@@ -709,28 +882,13 @@ void test_create_ea(void)
     fem2d_create_vp(&ea);
     fem2d_vp* vp_ptr;
     matlib_index j;
+    bool is_vpatch_OK;
+
     for ( vp_ptr = ea.vpatch_p; 
           vp_ptr < ea.nr_nodes + ea.vpatch_p; vp_ptr++)
     {
-        
-        fprintf(stderr, "\n");
-        fprintf(stderr, "patch lenth: %d\n", vp_ptr->len);
-        for (j = 0; j< vp_ptr->len; j++)
-        {
-            fprintf(stderr, "%d ", vp_ptr->domain_p[j]->domain_index);
-        }
-        fprintf(stderr, "\n");
-        for (j = 0; j< vp_ptr->len; j++)
-        {
-            fprintf(stderr, "%d ", vp_ptr->vert_index[j]);
-        }
-        fprintf(stderr, "\n");
-        for (j = 0; j< vp_ptr->len; j++)
-        {
-            fprintf(stderr, "%d ", vp_ptr->bvert_index[j]);
-        }
-        fprintf(stderr, "\n");
-        fprintf(stderr, "\n");
+        is_vpatch_OK = check_vp(vp_ptr);
+        CU_ASSERT_TRUE(is_vpatch_OK);
     }
     fem2d_free_ea(ea);
 }
@@ -1055,7 +1213,33 @@ void test_ref2mesh(void)
 #endif
 
 /*============================================================================*/
-fem2d_err poly_func
+fem2d_err poly_xfunc
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = (ptr[0] - 200.0*ptr[1]);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+fem2d_err poly_zfunc
 (
     fem2d_cc nodes_tmp, 
     matlib_zv u_nodes
@@ -1072,7 +1256,7 @@ fem2d_err poly_func
     for ( ptr = nodes_tmp.elem_p; 
           ptr < (nodes_tmp.elem_p +2 * (nodes_tmp.len)); ptr+=2, uptr++)
     {
-        *uptr = (ptr[0] + ptr[1]);
+        *uptr = (ptr[0] + I * ptr[1]);
     }
     debug_exit("exit status: %d", FEM2D_SUCCESS);
     return FEM2D_SUCCESS;
@@ -1081,7 +1265,34 @@ clean_up:
     return FEM2D_FAILURE;
 }
 
-fem2d_err poly_func1
+fem2d_err poly_xfunc1
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p +2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = (ptr[0] + 2.0 * ptr[1]);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+
+fem2d_err poly_zfunc1
 (
     fem2d_cc nodes_tmp, 
     matlib_zv u_nodes
@@ -1098,7 +1309,7 @@ fem2d_err poly_func1
     for ( ptr = nodes_tmp.elem_p; 
           ptr < (nodes_tmp.elem_p +2 * (nodes_tmp.len)); ptr+=2, uptr++)
     {
-        *uptr = (ptr[0] + 2.0*ptr[1]);
+        *uptr = (ptr[0] + 2.0 * I *ptr[1]);
     }
     debug_exit("exit status: %d", FEM2D_SUCCESS);
     return FEM2D_SUCCESS;
@@ -1107,20 +1318,68 @@ clean_up:
     return FEM2D_FAILURE;
 }
 
-void test_interp(void)
+
+void test_xinterp(void)
 {
 
     fem2d_ea ea;
     fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    fem2d_create_vp(&ea);
 
-    matlib_zv u_nodes;
-    matlib_create_zv( nodes.len, &u_nodes, MATLIB_COL_VECT);
-    poly_func(nodes, u_nodes);
-    DEBUG_PRINT_ZV(u_nodes, "%s:", "u_nodes");
+    matlib_xv u_nodes;
+    matlib_create_xv( nodes.len, &u_nodes, MATLIB_COL_VECT);
+    poly_xfunc(nodes, u_nodes);
+    //DEBUG_PRINT_XV(u_nodes, "%s:", "u_nodes");
 
     matlib_xm vphi;
     fem2d_refbasis(xi, &vphi);
-    DEBUG_PRINT_XM( vphi, "%s:", "vphi");
+    //DEBUG_PRINT_XM( vphi, "%s:", "vphi");
+
+    fem2d_cc x_interp;
+    fem2d_ref2mesh(ea, vphi, &x_interp);
+
+    matlib_xv u_interp;
+    matlib_xv u_exact;
+
+    matlib_create_xv( x_interp.len, &u_interp, MATLIB_COL_VECT);
+    matlib_create_xv( x_interp.len, &u_exact , MATLIB_COL_VECT);
+
+    fem2d_xinterp( ea, u_nodes, vphi, u_interp);
+    poly_xfunc(x_interp, u_exact);
+
+    BEGIN_DEBUG
+        for (matlib_index i = 0; i < u_interp.len; i++)
+        {
+            debug_print( "u[%d]-> diff: %0.16f",
+                         i, fabs(u_interp.elem_p[i]-u_exact.elem_p[i]));
+        }
+    END_DEBUG
+ 
+    matlib_real norm_actual = matlib_xnrm2(u_exact);
+    debug_body("norm: %0.16g", norm_actual);
+    matlib_xaxpy(-1.0, u_exact, u_interp);
+    matlib_real e_relative = matlib_xnrm2(u_interp)/norm_actual;
+
+    debug_exit("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative<TOL);
+
+}
+
+void test_zinterp(void)
+{
+
+    fem2d_ea ea;
+    fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    fem2d_create_vp(&ea);
+
+    matlib_zv u_nodes;
+    matlib_create_zv( nodes.len, &u_nodes, MATLIB_COL_VECT);
+    poly_zfunc(nodes, u_nodes);
+    //DEBUG_PRINT_ZV(u_nodes, "%s:", "u_nodes");
+
+    matlib_xm vphi;
+    fem2d_refbasis(xi, &vphi);
+    //DEBUG_PRINT_XM( vphi, "%s:", "vphi");
 
     fem2d_cc x_interp;
     fem2d_ref2mesh(ea, vphi, &x_interp);
@@ -1130,20 +1389,18 @@ void test_interp(void)
 
     matlib_create_zv( NR_DOMAINS * NR_QNODES, &u_interp, MATLIB_COL_VECT);
     matlib_create_zv( NR_DOMAINS * NR_QNODES, &u_exact , MATLIB_COL_VECT);
+
+    fem2d_zinterp( ea, u_nodes, vphi, u_interp);
+    poly_zfunc(x_interp, u_exact);
+
     BEGIN_DEBUG
         for (matlib_index i = 0; i < u_interp.len; i++)
         {
-            debug_print( "u[%d]-> diff: %0.16f%+0.16fi",
-                         i, 
+            debug_print( "u[%d]-> diff: %0.16f%+0.16fi", i, 
                          creal(u_interp.elem_p[i])-creal(u_exact.elem_p[i]),
                          cimag(u_interp.elem_p[i])-cimag(u_exact.elem_p[i]));
-        
         }
     END_DEBUG
-
-    fem2d_interp( ea, u_nodes, vphi, u_interp);
-    poly_func(x_interp, u_exact);
-
  
     matlib_real norm_actual = matlib_znrm2(u_exact);
     debug_body("norm: %0.16g", norm_actual);
@@ -1154,13 +1411,11 @@ void test_interp(void)
     CU_ASSERT_TRUE(e_relative<TOL);
 
 }
-
 fem2d_err test_func_interp1(void)
 {
 
     fem2d_err error = FEM2D_SUCCESS;
 
-    matlib_index mcnt_total = 6;
     matlib_index mcnt = 0;
 
     /* ea: element array */ 
@@ -1168,6 +1423,7 @@ fem2d_err test_func_interp1(void)
     error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Creation of element array failed!");
+    fem2d_create_vp(&ea);
     mcnt++; /* 1 */ 
 
     /* u_nodes: field values at nodes */ 
@@ -1176,7 +1432,7 @@ fem2d_err test_func_interp1(void)
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Memory allocation for field values at nodes failed!");
     mcnt++; /* 2 */ 
-    error = poly_func(nodes, u_nodes);
+    error = poly_zfunc(nodes, u_nodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of field at nodes failed!");
     DEBUG_PRINT_ZV(u_nodes, "%s:", "u_nodes");
@@ -1212,6 +1468,13 @@ fem2d_err test_func_interp1(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 6 */ 
 
+    error = fem2d_zinterp( ea, u_nodes, vphi, u_interp);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Interpolation failed!");
+
+    error = poly_zfunc(x_interp, u_exact);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
     BEGIN_DEBUG
         for (matlib_index i = 0; i < u_interp.len; i++)
         {
@@ -1222,14 +1485,6 @@ fem2d_err test_func_interp1(void)
         
         }
     END_DEBUG
-
-    error = fem2d_interp( ea, u_nodes, vphi, u_interp);
-    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
-               "Interpolation failed!");
-
-    error = poly_func(x_interp, u_exact);
-    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
-               "Calculation of exact field values failed!");
  
     matlib_real norm_actual = matlib_znrm2(u_exact);
     matlib_zaxpy(-1.0, u_exact, u_interp);
@@ -1283,13 +1538,17 @@ clean_up:
     debug_exit( "Exit Status: %s", "FAILURE");
     return FEM2D_FAILURE;
 }
+void test_interp1(void)
+{
+    fem2d_err error = test_func_interp1();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
 
-#if 1
-fem2d_err test_func_normL2(void)
+}
+/*============================================================================*/
+fem2d_err test_func_xnormL2(void)
 {
     fem2d_err error = FEM2D_SUCCESS;
 
-    matlib_index mcnt_total = 6;
     matlib_index mcnt = 0;
 
     /* ea: element array */ 
@@ -1297,6 +1556,7 @@ fem2d_err test_func_normL2(void)
     error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Creation of element array failed!");
+    fem2d_create_vp(&ea);
     mcnt++; /* 1 */ 
 
     /* vphi: matrix containing values of reference basis functions at 
@@ -1317,21 +1577,21 @@ fem2d_err test_func_normL2(void)
                "Creation of interpolation mesh-point array failed!");
     mcnt++; /* 3 */ 
     
-    matlib_zv u_qnodes;
-    error = matlib_create_zv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
+    matlib_xv u_qnodes;
+    error = matlib_create_xv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
     //error = FEM2D_FAILURE;
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Memory allocation for interpolation failed!");
     mcnt++; /* 4 */ 
 
-    error = poly_func(x_qnodes, u_qnodes);
+    error = poly_xfunc(x_qnodes, u_qnodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
     /* quadW: quadrature weights */ 
     matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
 
-    matlib_real normL2 = fem2d_normL2(ea, u_qnodes, quadW);
+    matlib_real normL2 = fem2d_xnormL2(ea, u_qnodes, quadW);
     debug_body("norm: %0.16f", normL2);
 
     matlib_free(x_qnodes.elem_p);
@@ -1363,8 +1623,99 @@ clean_up:
     return FEM2D_FAILURE;
 
 }
+void test_xnormL2(void)
+{
+    fem2d_err error = test_func_xnormL2();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
 
-fem2d_err test_func_iprod(void)
+}
+
+fem2d_err test_func_znormL2(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of element array failed!");
+    fem2d_create_vp(&ea);
+    mcnt++; /* 1 */ 
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi, &vphi);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of basis function-value matrix failed!");
+    mcnt++; /* 2 */ 
+    DEBUG_PRINT_XM( vphi, "%s:", "vphi");
+
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of interpolation mesh-point array failed!");
+    mcnt++; /* 3 */ 
+    
+    matlib_zv u_qnodes;
+    error = matlib_create_zv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 4 */ 
+
+    error = poly_zfunc(x_qnodes, u_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    /* quadW: quadrature weights */ 
+    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+
+    matlib_real normL2 = fem2d_znormL2(ea, u_qnodes, quadW);
+    debug_body("norm: %0.16f", normL2);
+
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(u_qnodes.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt==4)
+    {
+        matlib_free(u_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==3)
+    {
+        matlib_free(x_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==2)
+    {
+        matlib_free(vphi.elem_p);
+        mcnt--;
+    }
+    if (mcnt==1)
+    {
+        fem2d_free_ea(ea);
+    }
+    return FEM2D_FAILURE;
+
+}
+void test_znormL2(void)
+{
+    fem2d_err error = test_func_znormL2();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
+
+}
+/*============================================================================*/
+fem2d_err test_func_xiprod(void)
 {
     fem2d_err error = FEM2D_SUCCESS;
 
@@ -1376,6 +1727,109 @@ fem2d_err test_func_iprod(void)
     error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Creation of element array failed!");
+    fem2d_create_vp(&ea);
+    mcnt++; /* 1 */ 
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi, &vphi);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of basis function-value matrix failed!");
+    mcnt++; /* 2 */ 
+    DEBUG_PRINT_XM( vphi, "%s:", "vphi");
+
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of interpolation mesh-point array failed!");
+    mcnt++; /* 3 */ 
+
+    matlib_xv u_qnodes;
+    error = matlib_create_xv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 4 */ 
+
+    error = poly_xfunc(x_qnodes, u_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    matlib_xv v_qnodes;
+    error = matlib_create_xv( NR_DOMAINS * NR_QNODES, &v_qnodes , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 5 */ 
+
+    error = poly_xfunc1(x_qnodes, v_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    /* quadW: quadrature weights */ 
+    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+
+    matlib_real iprod = fem2d_xiprod(ea, u_qnodes, v_qnodes, quadW);
+    debug_body("inner product: %0.16f", iprod);
+
+    matlib_free(v_qnodes.elem_p);
+    matlib_free(u_qnodes.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if(mcnt==5)
+    {
+        matlib_free(v_qnodes.elem_p);
+        mcnt--;
+    }
+    if(mcnt==4)
+    {
+        matlib_free(u_qnodes.elem_p);
+        mcnt--;
+    }
+    if(mcnt==3)
+    {
+        matlib_free(x_qnodes.elem_p);
+        mcnt--;
+    }
+    if(mcnt==2)
+    {
+        matlib_free(vphi.elem_p);
+        mcnt--;
+    }
+    if(mcnt==1)
+    {
+        fem2d_free_ea(ea);
+    }
+    return FEM2D_FAILURE;
+}
+
+void test_xiprod(void)
+{
+    fem2d_err error = test_func_xiprod();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
+
+}
+fem2d_err test_func_ziprod(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index mcnt_total = 6;
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of element array failed!");
+    fem2d_create_vp(&ea);
     mcnt++; /* 1 */ 
 
     /* vphi: matrix containing values of reference basis functions at 
@@ -1403,7 +1857,7 @@ fem2d_err test_func_iprod(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 4 */ 
 
-    error = poly_func(x_qnodes, u_qnodes);
+    error = poly_zfunc(x_qnodes, u_qnodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
@@ -1414,15 +1868,15 @@ fem2d_err test_func_iprod(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 5 */ 
 
-    error = poly_func1(x_qnodes, v_qnodes);
+    error = poly_zfunc1(x_qnodes, v_qnodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
     /* quadW: quadrature weights */ 
     matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
 
-    matlib_real iprod = fem2d_iprod(ea, u_qnodes, v_qnodes, quadW);
-    debug_body("inner product: %0.16f", iprod);
+    matlib_complex iprod = fem2d_ziprod(ea, u_qnodes, v_qnodes, quadW);
+    debug_body("inner product: %0.16f%+0.16fi", iprod);
 
     matlib_free(v_qnodes.elem_p);
     matlib_free(u_qnodes.elem_p);
@@ -1459,8 +1913,170 @@ clean_up:
     return FEM2D_FAILURE;
 
 }
+void test_ziprod(void)
+{
+    fem2d_err error = test_func_ziprod();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
 
-fem2d_err test_func_prj(void)
+}
+/*============================================================================*/
+fem2d_err test_func_xprj(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of element array failed!");
+    fem2d_create_vp(&ea);
+    mcnt++; /* 1 */ 
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi, &vphi);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of basis function-value matrix failed!");
+    mcnt++; /* 2 */ 
+    DEBUG_PRINT_XM( vphi, "%s:", "vphi");
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of interpolation mesh-point array failed!");
+    mcnt++; /* 3 */ 
+    
+    matlib_xv u_qnodes;
+    error = matlib_create_xv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 4 */ 
+
+    error = poly_xfunc(x_qnodes, u_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( nodes.len, &u_prj , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 5 */ 
+    
+    /* quadW: quadrature weights */ 
+    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+
+    matlib_xm quadP;
+    error = fem2d_quadP( vphi, quadW, &quadP );
+    mcnt++; /* 6 */ 
+    DEBUG_PRINT_XM( quadP, "%s:", "quadP");
+
+    error = fem2d_xprj(ea, u_qnodes, quadP, u_prj);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of projection failed!");
+    DEBUG_PRINT_XV( u_prj, "%s:", "u_prj");
+
+    matlib_xv u_nodes;
+    error = matlib_create_xv( nodes.len, &u_nodes , MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+
+    error = poly_xfunc(nodes, u_nodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    matlib_xv u_prj1;
+    error = matlib_create_xv( nodes.len, &u_prj1 , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 8 */ 
+
+    error = fem2d_NB_xprj(ea, u_nodes, u_prj1);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of projection failed!");
+    DEBUG_PRINT_XV( u_prj1, "%s:", "u_prj");
+
+    BEGIN_DEBUG
+    matlib_real sum = 0;
+        for (matlib_index i = 0; i < u_prj.len; i++)
+        {
+            debug_print( "[%d], |prj - prj1|: %0.16f",
+                         i, fabs(u_prj.elem_p[i] - u_prj1.elem_p[i]));
+
+            sum += conj(u_nodes.elem_p[i]) * u_prj.elem_p[i];
+        }
+        debug_print( "new norm 1: %0.16f", sqrt(sum));
+        debug_print( "new norm 2: %0.16f",
+                     fem2d_NB_xnormL2(ea, u_nodes));
+        debug_print( "new norm 3: %0.16f",
+                     sqrt(fem2d_NB_xiprod(ea, u_nodes, u_nodes)));
+
+    END_DEBUG
+
+    matlib_real norm_actual = matlib_xnrm2(u_prj);
+    debug_body("norm: %0.16g", norm_actual);
+    matlib_xaxpy(-1.0, u_prj, u_prj1);
+    matlib_real e_relative = matlib_xnrm2(u_prj1)/norm_actual;
+
+    debug_exit("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative<TOL);
+    matlib_free(quadP.elem_p);
+    matlib_free(u_prj.elem_p);
+    matlib_free(u_qnodes.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt==6)
+    {
+        matlib_free(quadP.elem_p);
+        mcnt--;
+    }
+    if (mcnt==5)
+    {
+        matlib_free(u_prj.elem_p);
+        mcnt--;
+    }
+    if (mcnt==4)
+    {
+        matlib_free(u_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==3)
+    {
+        matlib_free(x_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==2)
+    {
+        matlib_free(vphi.elem_p);
+        mcnt--;
+    }
+    if (mcnt==1)
+    {
+        fem2d_free_ea(ea);
+    }
+    return FEM2D_FAILURE;
+
+}
+
+void test_xprj(void)
+{
+    fem2d_err error = test_func_xprj();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
+}
+
+fem2d_err test_func_zprj(void)
 {
     fem2d_err error = FEM2D_SUCCESS;
 
@@ -1472,6 +2088,7 @@ fem2d_err test_func_prj(void)
     error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Creation of element array failed!");
+    fem2d_create_vp(&ea);
     mcnt++; /* 1 */ 
 
     /* vphi: matrix containing values of reference basis functions at 
@@ -1499,7 +2116,7 @@ fem2d_err test_func_prj(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 4 */ 
 
-    error = poly_func(x_qnodes, u_qnodes);
+    error = poly_zfunc(x_qnodes, u_qnodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
@@ -1518,10 +2135,11 @@ fem2d_err test_func_prj(void)
     mcnt++; /* 6 */ 
     DEBUG_PRINT_XM( quadP, "%s:", "quadP");
 
-    error = fem2d_prj(ea, u_qnodes, quadP, u_prj);
+    error = fem2d_zprj(ea, u_qnodes, quadP, u_prj);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of projection failed!");
     DEBUG_PRINT_ZV( u_prj, "%s:", "u_prj");
+
 
     matlib_free(quadP.elem_p);
     matlib_free(u_prj.elem_p);
@@ -1565,11 +2183,17 @@ clean_up:
 
 }
 
-fem2d_err test_func_LEprj(void)
+void test_zprj(void)
+{
+    fem2d_err error = test_func_zprj();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
+}
+/*============================================================================*/
+
+fem2d_err test_func_NB_zprj(void)
 {
     fem2d_err error = FEM2D_SUCCESS;
 
-    matlib_index mcnt_total = 6;
     matlib_index mcnt = 0;
 
     /* ea: element array */ 
@@ -1577,6 +2201,7 @@ fem2d_err test_func_LEprj(void)
     error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Creation of element array failed!");
+    fem2d_create_vp(&ea);
     mcnt++; /* 1 */ 
 
     /* vphi: matrix containing values of reference basis functions at 
@@ -1604,7 +2229,7 @@ fem2d_err test_func_LEprj(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 4 */ 
 
-    error = poly_func(x_qnodes, u_qnodes);
+    error = poly_zfunc(x_qnodes, u_qnodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
@@ -1636,7 +2261,7 @@ fem2d_err test_func_LEprj(void)
     DEBUG_PRINT_XM( MEMI_tmp, "%s:", "MEMI_tmp");
 
 
-    error = fem2d_prj(ea, u_qnodes, quadP, u_prj);
+    error = fem2d_zprj(ea, u_qnodes, quadP, u_prj);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of projection failed!");
 
@@ -1648,7 +2273,7 @@ fem2d_err test_func_LEprj(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 7 */ 
 
-    error = poly_func(nodes, u_nodes);
+    error = poly_zfunc(nodes, u_nodes);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of exact field values failed!");
 
@@ -1659,23 +2284,23 @@ fem2d_err test_func_LEprj(void)
                "Memory allocation for interpolation failed!");
     mcnt++; /* 8 */ 
 
-    error = fem2d_LEprj(ea, u_nodes, u_prj1);
+    error = fem2d_NB_zprj(ea, u_nodes, u_prj1);
     err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
                "Calculation of projection failed!");
     DEBUG_PRINT_ZV( u_prj1, "%s:", "u_prj");
-    matlib_complex sum = 0;
     BEGIN_DEBUG
+    matlib_complex sum = 0;
         for (matlib_index i = 0; i < u_prj.len; i++)
         {
             debug_print( "[%d], prj: %0.16f%+0.16fi, prj1: %0.16f%+0.16f",
                          i, u_prj.elem_p[i], u_prj1.elem_p[i]);
             sum += conj(u_nodes.elem_p[i]) * u_prj.elem_p[i];
         }
-        debug_print( "new norm: %0.16f%+0.16fi", csqrt(sum));
-        debug_print( "new norm: %0.16f",
-                     fem2d_LEnormL2(ea, u_nodes));
-        debug_print( "new norm: %0.16f%+0.16fi",
-                     csqrt(fem2d_LEiprod(ea, u_nodes, u_nodes)));
+        debug_print( "new norm 1: %0.16f%+0.16fi", csqrt(sum));
+        debug_print( "new norm 2: %0.16f",
+                     fem2d_NB_znormL2(ea, u_nodes));
+        debug_print( "new norm 3: %0.16f%+0.16fi",
+                     csqrt(fem2d_NB_ziprod(ea, u_nodes, u_nodes)));
 
     END_DEBUG
 
@@ -1740,33 +2365,11 @@ clean_up:
     return FEM2D_FAILURE;
 
 }
-#endif 
-void test_interp1(void)
+
+void test_NB_zprj(void)
 {
-    fem2d_err error = test_func_interp1();
+    fem2d_err error = test_func_NB_zprj();
     CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
-
-}
-void test_normL2(void)
-{
-    fem2d_err error = test_func_normL2();
-    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
-
-}
-void test_iprod(void)
-{
-    fem2d_err error = test_func_iprod();
-    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
-
-}
-
-void test_prj(void)
-{
-    fem2d_err error = test_func_prj();
-    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
-    error = test_func_LEprj();
-    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
-
 }
 
 void test_quadM(void)
@@ -1881,8 +2484,274 @@ void test_nnz(void)
     fem2d_free_ea(ea);
 
 }
+static void full_sym_mat
+(
+    matlib_xm_sparse sM,
+    matlib_xm*      M
+)
+{
+    matlib_index i, j;
+    
+    matlib_create_xm( sM.lenc, sM.lenr, M, MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);    
 
-/*============================================================================*/
+    for(i=0; i<sM.lenc; i++)
+    {
+        j = sM.rowIn[i];
+        M->elem_p[i*sM.lenr+sM.colIn[j]] = sM.elem_p[j];
+        if(j != i)
+        {
+            M->elem_p[sM.colIn[j]*sM.lenr+i] = sM.elem_p[j];
+        }
+        for(j=sM.rowIn[i]+1; j<sM.rowIn[i+1]; j++)
+        {
+            M->elem_p[i*sM.lenr+sM.colIn[j]] = sM.elem_p[j];
+            M->elem_p[sM.colIn[j]*sM.lenr+i] = sM.elem_p[j];
+        }
+    }
+
+}
+
+
+#if 1
+/*  Projection of phi(x)u on vertex basis can be obtained by computing the
+ *  projection directly, or, using the mass-matrix for phi(x) and multiplying it
+ *  with the vertex basis representation of u.
+ *
+ * we test the equality of the two to ensure the consistency of imlementation.
+ * Let phi(x) = x.
+ *
+ * */ 
+fem2d_err test_func_GMM(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(nodes, ia, NR_DOMAINS, &ea);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of element array failed!");
+    mcnt++; /* 1 */ 
+    error = fem2d_create_vp(&ea);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of element array failed!");
+    mcnt++; /* 2 */ 
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi, &vphi);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of basis function-value matrix failed!");
+    mcnt++; /* 3 */ 
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of interpolation mesh-point array failed!");
+    mcnt++; /* 4 */ 
+    
+    matlib_xv u_qnodes;
+    error = matlib_create_xv( NR_DOMAINS * NR_QNODES, &u_qnodes , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 5 */ 
+
+    error = poly_xfunc(x_qnodes, u_qnodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( nodes.len, &u_prj , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 6 */ 
+
+    /* quadW: quadrature weights */ 
+    matlib_xv quadW = {.len = NR_QNODES, .elem_p = (matlib_real*)qwa};
+
+    matlib_xm quadP;
+    error = fem2d_quadP( vphi, quadW, &quadP );
+    mcnt++; /* 7 */ 
+
+    error = fem2d_xprj(ea, u_qnodes, quadP, u_prj);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of projection failed!");
+
+
+    matlib_xm Q;
+    error = fem2d_quadM( vphi, quadW, &Q);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of quadrature matrix failed!");
+    mcnt++; /* 8 */ 
+    
+    
+    matlib_xv phi;
+    error = matlib_create_xv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    mcnt++; /* 9 */
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = 1.0;
+
+    }
+    matlib_xm_sparse M;
+    error = fem2d_xm_sparse_GMM( ea, Q, phi, &M);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of sparse matrix failed!");
+
+    matlib_xm_sparse M1;
+    error = fem2d_xm_sparse_GMM1( ea, &M1);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Creation of sparse matrix failed!");
+    
+    matlib_xv VM = {.len = M.rowIn[M.lenc], .elem_p = M.elem_p};
+    matlib_xv VM1 = {.len = M1.rowIn[M1.lenc], .elem_p = M1.elem_p};
+
+
+    BEGIN_DEBUG
+        matlib_index i, j;
+        for (i = 0; i < ea.nr_nodes; i++)
+        {
+            for (j = M.rowIn[i]; j < M.rowIn[i+1]; j++)
+            {
+                debug_print( "GMM[%d][%d]: %0.16f",
+                             i, M.colIn[j], M.elem_p[j]);
+                //debug_print( "GMM[%d][%d]-> |M - M1|: %0.16f",
+                //             i, M.colIn[j], fabs(M.elem_p[j] - M1.elem_p[j]));
+            }
+        }
+
+        /* Check diagonal entries */ 
+        matlib_real diag_elem, jacob;
+        for (i = 0; i < ea.nr_nodes; i++)
+        {
+            diag_elem = 0;
+            for (j = 0; j < ea.vpatch_p[i].len; j++ )
+            {
+                jacob = ea.vpatch_p[i].domain_p[j]->jacob;
+                diag_elem += jacob * MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1];
+            }
+            j = M.rowIn[i];
+            debug_print( "GMM[%d][%d] - diag. elem.: %0.16f",
+                         i, M.colIn[j], M.elem_p[j]-diag_elem);
+        }
+    END_DEBUG
+    matlib_xv u_nodes;
+    error = matlib_create_xv( nodes.len, &u_nodes , MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+
+    error = poly_xfunc(nodes, u_nodes);
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Calculation of exact field values failed!");
+    matlib_xv u_prj1;
+    error = matlib_create_xv( nodes.len, &u_prj1 , MATLIB_COL_VECT);
+    //error = FEM2D_FAILURE;
+    err_check( (error == FEM2D_FAILURE), clean_up, "%s", 
+               "Memory allocation for interpolation failed!");
+    matlib_xcsrsymv(MATLIB_UPPER, M1, u_nodes, u_prj1);
+    //matlib_xm fM;
+    //full_sym_mat(M1, &fM);
+    //matlib_xgemv(1.0, fM, u_nodes, 0.0, u_prj1);
+
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < u_prj.len; i++ )
+        {
+            debug_print( "[%d]-> |u_prj - u_prj1|: %0.16f",
+                         i, fabs(u_prj.elem_p[i] - u_prj1.elem_p[i]));
+        }
+    END_DEBUG
+
+
+    matlib_real norm_actual = matlib_xnrm2(u_prj);
+    debug_body("norm: %0.16g", norm_actual);
+    matlib_xaxpy(-1.0, u_prj, u_prj1);
+    matlib_real e_relative = matlib_xnrm2(u_prj1)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative<TOL);
+
+    norm_actual = matlib_xnrm2(VM);
+    debug_body("norm: %0.16g", norm_actual);
+    matlib_xaxpy(-1.0, VM, VM1);
+    e_relative = matlib_xnrm2(VM1)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative<TOL);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(quadP.elem_p);
+    matlib_free(u_prj.elem_p);
+    matlib_free(u_qnodes.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt==7)
+    {
+        matlib_free(quadP.elem_p);
+        mcnt--;
+    }
+    if (mcnt==6)
+    {
+        matlib_free(u_prj.elem_p);
+        mcnt--;
+    }
+    if (mcnt==5)
+    {
+        matlib_free(u_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==4)
+    {
+        matlib_free(x_qnodes.elem_p);
+        mcnt--;
+    }
+    if (mcnt==3)
+    {
+        matlib_free(vphi.elem_p);
+        mcnt--;
+    }
+    if ((mcnt==1) || (mcnt == 2))
+    {
+        fem2d_free_ea(ea);
+    }
+    return FEM2D_FAILURE;
+
+}
+
+void test_GMM(void)
+{
+    fem2d_err error = test_func_GMM();
+    CU_ASSERT_TRUE(error == FEM2D_SUCCESS);
+
+}
+#endif
+
+/*============================================================================+/
+ |  
+ | 
+ |
+ |
+ |
+/+============================================================================*/
 
 int main()
 {
@@ -1897,23 +2766,31 @@ int main()
     /* Create a test array */
     CU_TestInfo test_array[] = 
     {
+#if 0
         { "Create vertex patch"              , test_create_vp},
-        { "Create element array"               , test_create_ea },
         { "Create element array1"              , test_create_ea1},
         { "Create element array2"              , test_create_ea2},
-        { "Create index array"              , test_create_ia},
+        { "Create index array"                 , test_create_ia},
         { "Centroid"                           , test_centroid  },
         { "Centroid1"                          , test_centroid1 },
+        { "Interpolation real"                 , test_xinterp   },
+        { "Interpolation complex"              , test_zinterp   },
+        { "Interpolation complex1"             , test_interp1   },
+        { "L2 norm real", test_xnormL2    },
+        { "L2 norm complex", test_znormL2    },
+        { "Inner product real", test_xiprod    },
+        { "Inner product complex", test_ziprod    },
         { "Ref. basis"                         , test_refbasis  },
-        { "Interpolation on trianglar elements", test_interp    },
-        { "Interpolation on trianglar elements1", test_interp1    },
-        { "L2 norm", test_normL2    },
-        { "Inner product", test_iprod    },
-        { "projection ", test_prj    },
         { "quadM ", test_quadM    },
         { "quadM2 ", test_quadM2    },
         {"test sort", test_sort},
         {"test NNZ", test_nnz},
+        { "Create element array"               , test_create_ea },
+        { "projection complex", test_zprj    },
+        { "NB complex", test_NB_zprj    },
+        { "projection real", test_xprj    },
+#endif
+        {"test GMM", test_GMM},
         CU_TEST_INFO_NULL,
     };
 

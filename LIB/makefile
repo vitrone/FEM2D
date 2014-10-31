@@ -60,13 +60,13 @@ BUILDDIR = ../BUILD
 # EVIRONMENT VARIABLES:
 #  -I : for specifying include path
 #  -L : for library path
-# Both of these above option can be configures by using environment variables 
+# Both of these above option can be configured by using environment variables 
 #  C_INCLUDE_PATH, LIBRARY_PATH
 #  Load path can be added by using LD_LIBRARY_PATH
 #
 # # TYPES OF LIBRARIES: 
 # (1) Static type: extension '.a', requires static linking
-# (1) Shared type: extension '.so', requires dynamic linking
+# (2) Shared type: extension '.so', requires dynamic linking
 
 EXT = so
 
