@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include "mex.h"
 #include "matrix.h"
-#include "matlib.h"
 
+#define NDEBUG
+#define MATLIB_NTRACE_DATA
+
+#include "matlib.h"
 /*============================================================================*/
 
 static void adapt_complex_data

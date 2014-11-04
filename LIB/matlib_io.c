@@ -12,6 +12,7 @@
 #include <errno.h>
 
 //#define NDEBUG
+#define MATLIB_NTRACE_DATA
 
 #include "matlib.h"
 #include "assert.h"
@@ -623,7 +624,6 @@ matlib_err matlib_io_fwrite
     debug_exit("Exit Status: %s", "SUCCESS");
     return MATLIB_SUCCESS;
 clean_up:
-    fclose(fp);
     debug_exit("Exit Status: %s", "FAILURE");
     return MATLIB_FAILURE;
 }
@@ -1099,6 +1099,10 @@ matlib_err matlib_io_getinfo
     return MATLIB_SUCCESS;
 
 clean_up:
+    if (mcnt == 1)
+    {
+        matlib_io_free(mp);
+    }
     debug_exit("Exit Status: %s", "FAILURE");
     return MATLIB_FAILURE;
 
@@ -1196,6 +1200,10 @@ matlib_err matlib_io_fread
     err_check(    (mp        == NULL)
                || (file_name == NULL), clean_up, 
                "%s", "Null pointer encountered!");
+
+    matlib_index i, mcnt = 0;
+    matlib_int j;
+
     errno = 0;
     FILE* fp;
     fp = fopen(file_name, "rb");
@@ -1206,8 +1214,7 @@ matlib_err matlib_io_fread
     err_check( error == MATLIB_FAILURE, clean_up, 
                "%s", "Failed to get info from file!");
 
-    matlib_index i;
-    matlib_int j;
+    mcnt ++;
 
     i = fseek(fp, mp->size[0], SEEK_SET);
     err_check( i != 0, clean_up, 
@@ -1260,12 +1267,14 @@ matlib_err matlib_io_fread
 
 clean_up:
 
-    j = (matlib_int)i;
-    for (; j>=0; j--)
+    if (mcnt == 1)
     {
-        matlib_io_elemfree(mp, j);
+        j = (matlib_int)i;
+        for (; j>=0; j--)
+        {
+            matlib_io_elemfree(mp, j);
+        }
     }
-    fclose(fp);
     debug_exit("Exit Status: %s", "FAILURE");
     return MATLIB_FAILURE;
 }
@@ -1708,111 +1717,6 @@ clean_up:
     return MATLIB_FAILURE;
 }
 
-#if 0
-matlib_err matlib_io_mem_analyze
-(
-    matlib_io_t* mp,
-    FILE* fp
-)
-{
-    err_check( (mp == NULL) || (fp == NULL), clean_up,
-               "%s", "Null pointer(s) encountered!");
-
-    matlib_index mcnt = 0;
-    size_t nr_elems;
-    matlib_index alen;
-    nr_elems = fread( &(alen), MATLIB_INDEX_SIZE, 1, fp);
-    err_check( nr_elems != 1, clean_up, 
-               "A reading error occurred "
-               "(nr. elements read: %d, total nr. elements: %d)!",
-               nr_elems, 1);
-
-    matlib_err error = matlib_io_create(alen, mp);
-    err_check( error == MATLIB_FAILURE, clean_up, 
-               "%s", "Failed to allocate memory!");
-    mcnt++;
-
-    mp->size[0] = (mp->len + 1) * MATLIB_INDEX_SIZE;
-    nr_elems = fread( &(mp->size[1]), MATLIB_INDEX_SIZE, mp->len, fp);
-    err_check( nr_elems != mp->len, clean_up, 
-               "A reading error occurred "
-               "(nr. elements read: %d, total nr. elements: %d)!",
-               nr_elems, mp->len);
-
-    matlib_index i, r;
-    char formatc;
-    size_t offset = mp->size[0];
-    for (i = 0; i < mp->len; i++)
-    {
-        nr_elems = fread( &formatc, MATLIB_ENUM_SIZE, 1, fp);
-        err_check( nr_elems != 1, clean_up, 
-                   "A reading error occurred "
-                   "(nr. elements read: %d, total nr. elements: %d)!",
-                   nr_elems, 1);
-        debug_body("Format: %c", formatc);
-
-        mp->format[i] = matlib_io_format_enum(formatc);
-        err_check( mp->format[i] == MATLIB_FORMAT_UNKNOWN, clean_up, 
-                   "Unknown matrix format encountered (data index: %d)!", i);
-
-        if (mp->format[i] == MATLIB_XV)
-        {
-            error = matlib_io_xv_read(mp, i, fp);
-            err_check( error == MATLIB_FAILURE, clean_up, 
-                       "Failed to read real vector (data index: %d)!", i);
-        }
-        else if (mp->format[i] == MATLIB_ZV)
-        {
-            error = matlib_io_zv_read(mp, i, fp);
-            err_check( error == MATLIB_FAILURE, clean_up, 
-                       "Failed to read complex vector (data index: %d)!", i);
-        }
-        else if (mp->format[i] == MATLIB_DEN_XM)
-        {
-            error = matlib_io_xm_read(mp, i, fp);
-            err_check( error == MATLIB_FAILURE, clean_up, 
-                       "Failed to read real matrix (data index: %d)!", i);
-        }
-        else if (mp->format[i] == MATLIB_DEN_ZM)
-        {
-            error = matlib_io_zm_read(mp, i, fp);
-            err_check( error == MATLIB_FAILURE, clean_up, 
-                       "Failed to read complex matrix (data index: %d)!", i);
-        }
-        else if (mp->format[i] == MATLIB_NV)
-        {
-            error = matlib_io_nv_read(mp, i, fp);
-            err_check( error == MATLIB_FAILURE, clean_up, 
-                       "Failed to read integer matrix (data index: %d)!", i);
-        }
-
-
-
-
-        offset = (mp->size[i+1] - MATLIB_ENUM_SIZE);
-        debug_body("Offset: %zu", offset);
-        r = fseek(fp, offset, SEEK_CUR);
-        err_check( r != 0, clean_up, 
-                   "Error occurred moving within the file (nr bytes: %zu)!",
-                   offset);
-    }
-    
-    /* Return to the begining of the file */ 
-    r = fseek(fp, 0L, SEEK_SET);
-    err_check( r != 0, clean_up, 
-               "%s", "Failed to return to the begining of the file!");
-
-    debug_exit("Exit Status: %s", "SUCCESS");
-    return MATLIB_SUCCESS;
-
-clean_up:
-    debug_exit("Exit Status: %s", "FAILURE");
-    return MATLIB_FAILURE;
-
-    
-
-}
-#endif
 
 /*============================================================================*/
 

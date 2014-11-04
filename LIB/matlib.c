@@ -28,7 +28,7 @@
  |                         Own Module Includes                                |
  |                                                                            |
  +============================================================================*/
-//#define NDEBUG
+#define NDEBUG
 
 #include "matlib.h"
 #include "assert.h"

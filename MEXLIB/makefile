@@ -45,13 +45,14 @@ BUILDDIR = ../MEXBUILD
 INC_DIR  = ../INCLUDE
 LIB_DIR  = ../LIB
 # add the .c mex files here
-SOURCES = tricall.c          \
-	  mxfem2d_delaunay.c \
-	  mxfem2d_remesh.c   \
+SOURCES = tricall.c           \
+	  mxfem2d_delaunay.c  \
+	  mxfem2d_remesh.c    \
 	  mxfem2d_checkmesh.c \
 	  mxmatlib_gemm.c     \
 	  mxmatlib_io_write.c \
-	  mxmatlib_io_read.c
+	  mxmatlib_io_read.c  \
+	  mxfem2d_create_vp.c   
 
 
 TARGETS = $(SOURCES:%.c=$(BUILDDIR)/%.mexa64)

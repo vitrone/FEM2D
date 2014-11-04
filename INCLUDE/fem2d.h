@@ -46,11 +46,13 @@ typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
     matlib_index* nindex_p; /* pointer to the node indices forming the triangle */ 
+    matlib_index* vorder_p; 
     matlib_index  domain_index;
     matlib_index* pos_vpatch;
     matlib_real   jacob;
     matlib_real*  ijmat;
     matlib_real*  jmat;
+    matlib_int    sign;
 
 } fem2d_te; /* triangular element */
 
@@ -130,6 +132,46 @@ extern const matlib_index FEM2D_INDEX_V22;
 extern const matlib_index FEM2D_INDEX_V23;
 extern const matlib_index FEM2D_INDEX_V33;
 extern const matlib_index FEM2D_NR_COMBI;
+
+/*============================================================================*/
+#define FEM2D_MESH_TOL (1e-9)
+
+typedef enum
+{
+    FEM2D_TEST_PASSED,
+    FEM2D_TEST_FAILED
+
+} FEM2D_TEST_PF;
+
+#define FEM2D_TEST_PF_ENUM2STR(pf_enum)                   \
+    (pf_enum == FEM2D_TEST_PASSED ? "PASSED":             \
+     (pf_enum == FEM2D_TEST_FAILED ? "FAILED": "UNKLNOWN"))
+
+
+typedef struct
+{
+    matlib_index nr_total;
+    matlib_index nr_failed;
+    matlib_index nr_passed;
+
+    FEM2D_TEST_PF  option;
+    FEM2D_TEST_PF* edge_mid_points;
+    FEM2D_TEST_PF* pos_vpatch;
+    FEM2D_TEST_PF* vpatch_boundary;
+    matlib_index*  vpatch_index; 
+
+} fem2d_vpinfo_t;
+
+#define BOOL2PF(b)                                \
+    ((b) ? FEM2D_TEST_PASSED : FEM2D_TEST_FAILED)
+
+#define VPINFO_PRINT(fp, fmt,...)   \
+        do {                        \
+            fprintf( fp,            \
+                     "\t" fmt "\n", \
+                     __VA_ARGS__);  \
+           } while (0)
+
 /*============================================================================*/
 
 fem2d_err fem2d_create_cc
@@ -162,7 +204,21 @@ fem2d_err fem2d_sort_node_index
     matlib_index  ilen,
     matlib_int*   iorder
 );
-matlib_real fem2d_check_vp(fem2d_ea ea);
+
+fem2d_err fem2d_check_vp
+(
+    fem2d_ea ea,
+    fem2d_vpinfo_t* test_info
+);
+
+fem2d_err fem2d_write_vpinfo
+(
+    fem2d_vpinfo_t* test_info,
+    fem2d_ea ea,
+    char* file_name
+);
+
+void fem2d_free_vpinfo(fem2d_vpinfo_t* test_info);
 
 void fem2d_free_ea(fem2d_ea ea);
 
@@ -241,6 +297,13 @@ fem2d_err fem2d_quadP
     matlib_xv  quadW,
     matlib_xm* quadP
 );
+matlib_real fem2d_check_quadP
+(
+    fem2d_cc     xi,
+    matlib_xv    quadW,
+    matlib_index m,
+    matlib_index n
+);
 
 fem2d_err fem2d_xprj
 (
@@ -304,6 +367,11 @@ fem2d_err fem2d_quadM
     matlib_xm* Q
 );
 
+matlib_real fem2d_poly_symint
+(
+    matlib_index m,
+    matlib_index n
+);
 matlib_real fem2d_check_quadM
 (
     fem2d_cc     xi,
@@ -354,6 +422,15 @@ fem2d_err fem2d_xm_sparse_GMM1
     fem2d_ea          ea,
     matlib_xm_sparse* M
 );
+
+
+fem2d_err fem2d_getmesh
+(
+    char* file_name,
+    fem2d_cc* nodes,
+    matlib_nv* iv
+);
+
 /*============================================================================+/
  | Quadrature on triangular domain
 /+============================================================================*/

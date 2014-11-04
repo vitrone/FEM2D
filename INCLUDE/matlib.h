@@ -50,7 +50,7 @@
 
 #endif
 
-#define MATLIB_TOL (1e-9)
+#define MATLIB_TOL (1e-12)
 #define MATLIB_NAN NAN
 
 /* Error handling */ 
@@ -599,6 +599,47 @@ typedef struct
 #define MATLIB_INT_SIZE     (sizeof(matlib_int))
 #define MATLIB_COMPLEX_SIZE (sizeof(matlib_complex))
 #define MATLIB_ENUM_SIZE    (sizeof(char))
+
+/* Display macros */ 
+
+#define MATLIB_IO_PRINT_NV(nv, i)                     \
+    do{                                               \
+        printf("[*] Data Entry: %d\n", i);            \
+        printf("[-] Data Type: Vector of Integers\n");\
+        printf("[-] Length: %d\n", (nv).len);         \
+    } while (0)
+
+
+#define MATLIB_IO_PRINT_XV(xv, i)                         \
+    do{                                                   \
+        printf("[*] Data Entry: %d\n", i);                \
+        printf("[-] Data Type: Vector of Real Numbers\n");\
+        printf("[-] Length: %d\n", (xv).len);             \
+    } while (0)
+
+#define MATLIB_IO_PRINT_ZV(zv, i)                             \
+    do{                                                       \
+        printf("[*] Data Entry: %d\n", i);                    \
+        printf("[-] Data Type: Vector of Complex Numbers\n"); \
+        printf("[-] Length: %d\n", (zv).len);                 \
+    } while (0)
+
+#define MATLIB_IO_PRINT_XM(xm, i)                                          \
+    do{                                                                    \
+        printf("[*] Data Entry: %d\n", i);                                 \
+        printf("[-] Data Type: Matrix of Real Numbers\n");                 \
+        printf("[-] Size: %d-by-%d\n", (xm).lenc, (xm).lenr);              \
+        printf("[-] Storage Order: %s\n", MATLIB_ORDER_ENUM2STR(xm.order));\
+    } while (0)
+
+#define MATLIB_IO_PRINT_ZM(zm, i)                                          \
+    do{                                                                    \
+        printf("[*] Data Entry: %d\n", i);                                 \
+        printf("[-] Data Type: Matrix of Complex Numbers\n");              \
+        printf("[-] Size: %d-by-%d\n", (zm).lenc, (zm).lenr);              \
+        printf("[-] Storage Order: %s\n", MATLIB_ORDER_ENUM2STR(zm.order));\
+    } while (0)
+/*============================================================================*/
 
 matlib_err matlib_io_create(matlib_index len, matlib_io_t* mp);
 matlib_err matlib_io_size(matlib_io_t* mp);

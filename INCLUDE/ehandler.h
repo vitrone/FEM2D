@@ -6,12 +6,13 @@
  * or wrapper functions.
  *
  * */
-#define ENABLE_ERR_CHECKS (1)
+#define _ENABLE_ERR_CHECKS (1)
+#define _ENABLE_WARNINGS   (1)
 /*
  * Use stringification (#) to log a warning.
  * */ 
 #define warn_if(EXPR, fmt,...)                   \
-        do { if(EXPR)                            \
+        do { if((EXPR) && (_ENABLE_WARNINGS) )    \
             fprintf( stderr,                     \
                      "%s:%s: WARNING: (%s)=TRUE:"\
                      fmt "\n",                   \
@@ -70,7 +71,7 @@
 
 
 #define err_check(EXPR, LABEL, fmt,...)          \
-        do { if((EXPR) && ENABLE_ERR_CHECKS){    \
+        do { if((EXPR) && _ENABLE_ERR_CHECKS){    \
             fprintf( stderr,                     \
                      "%s:%d:%s: Error: (%s)=TRUE:"\
                      fmt "\n",                   \
