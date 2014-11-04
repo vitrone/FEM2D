@@ -2238,9 +2238,11 @@ fem2d_err fem2d_xprj
                "%s", "Null pointers ecountered!");
 
     err_check(    (u_qnodes.len != quadP.lenr * ea.len) 
-               || (quadP.lenc   != FEM2D_NV), clean_up, 
-               "Dimension mis-match (u_qnodes: %d, quadP: %d-by-%d)!",
-               u_qnodes.len, quadP.lenc, quadP.lenr);
+               || (quadP.lenc   != FEM2D_NV) 
+               || (u_prj.len    != ea.nr_nodes), clean_up, 
+               "Dimension mis-match "
+               "(u_qnodes: %d, quadP: %d-by-%d, u_prj: %d, nr nodes: %d)!",
+               u_qnodes.len, quadP.lenc, quadP.lenr, u_prj.len, ea.nr_nodes);
 
     matlib_index INDEX_REAL  = 0;
 
@@ -2331,7 +2333,8 @@ fem2d_err fem2d_zprj
                "%s", "Null pointers ecountered!");
 
     err_check(    (u_qnodes.len != quadP.lenr * ea.len) 
-               || (quadP.lenc   != FEM2D_NV), clean_up, 
+               || (quadP.lenc   != FEM2D_NV)
+               || (u_prj.len    != ea.nr_nodes), clean_up, 
                "Dimension mis-match (u_qnodes: %d, quadP: %d-by-%d)!",
                u_qnodes.len, quadP.lenc, quadP.lenr);
 
@@ -2428,9 +2431,10 @@ fem2d_err fem2d_NB_xprj
                || (u_prj.elem_p   == NULL), clean_up, 
                "%s", "Null pointers ecountered!");
 
-    err_check( (u_nodes.len != ea.nr_nodes), clean_up, 
-               "Dimension mis-match (u_nodes: %d, nr nodes: %d)!",
-               u_nodes.len, ea.nr_nodes);
+    err_check(    (u_nodes.len != ea.nr_nodes) 
+               || (u_prj.len   != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, u_prj: %d, nr nodes: %d)!",
+               u_nodes.len, u_prj.len, ea.nr_nodes);
 
     fem2d_te* dptr; /* domain pointer */
     
@@ -2771,7 +2775,7 @@ matlib_real fem2d_NB_xiprod
         fg33 = f3 * g3 * jacob;
 
         fg12 = (f1 * g2 + f2 * g1) * jacob;
-        fg13 = (f1 * f3 + f3 * g1) * jacob;
+        fg13 = (f1 * g3 + f3 * g1) * jacob;
         fg23 = (f2 * g3 + f3 * g2) * jacob;
         
         sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * fg11
@@ -2847,7 +2851,7 @@ matlib_complex fem2d_NB_ziprod
         fg33 = f3 * conj(g3) * jacob;
 
         fg12 = (f1 * conj(g2) + f2 * conj(g1)) * jacob;
-        fg13 = (f1 * conj(f3) + f3 * conj(g1)) * jacob;
+        fg13 = (f1 * conj(g3) + f3 * conj(g1)) * jacob;
         fg23 = (f2 * conj(g3) + f3 * conj(g2)) * jacob;
         
         sum += (   MEMI[FEM2D_INDEX_V1][FEM2D_INDEX_V1] * fg11
@@ -3259,12 +3263,9 @@ fem2d_err fem2d_XCSRGMM
     matlib_index i, pos_vpatch, other_vertex, node_index;
     matlib_int j;
 
-    matlib_index* iter = calloc(row[ea.nr_nodes], sizeof(matlib_index));
-
     for (i = 0; i < row[ea.nr_nodes]; i++ )
     {
         ugpmm[i] = 0.0;
-        iter[i]  = 0;
     }
     for ( dptr = ea.elem_p; dptr < ea.elem_p + ea.len;
           dptr++, qptr += FEM2D_NR_COMBI)
@@ -3275,24 +3276,17 @@ fem2d_err fem2d_XCSRGMM
 
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V11];
-        iter[i] ++;
         
         pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V1];
-        debug_body( "node: %d, pos in vertex patch: %d",
-                    node_index, pos_vpatch);
 
         j = ea.vpatch_p[node_index].node_order[pos_vpatch];
-        debug_body("offset from diagonal in sparse array: %d", j);
         other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
-        err_check( FEM2D_INDEX_V1 != ea.vpatch_p[node_index].vert_index[pos_vpatch], 
-                   clean_up, "%s", "Wrong vertex index encountered!");
 
         if (other_vertex == FEM2D_INDEX_V2)
         {
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3312,9 +3306,7 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
-                iter[i+j] ++;
             }
         }
         else
@@ -3322,7 +3314,6 @@ fem2d_err fem2d_XCSRGMM
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3342,9 +3333,7 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
-                iter[i+j] ++;
             }
         }
         /* ======== */
@@ -3353,24 +3342,19 @@ fem2d_err fem2d_XCSRGMM
 
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V22];
-        iter[i] ++;
         
         pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V2];
         debug_body( "node: %d, pos in vertex patch: %d",
                     node_index, pos_vpatch);
 
         j = ea.vpatch_p[node_index].node_order[pos_vpatch];
-        debug_body("offset from diagonal in sparse array: %d", j);
         other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
-        err_check( FEM2D_INDEX_V2 != ea.vpatch_p[node_index].vert_index[pos_vpatch], 
-                   clean_up, "%s", "Wrong vertex index encountered!");
 
         if (other_vertex == FEM2D_INDEX_V3)
         {
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3390,9 +3374,7 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
-                iter[i+j] ++;
             }
         }
         else
@@ -3400,7 +3382,6 @@ fem2d_err fem2d_XCSRGMM
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3420,9 +3401,7 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
-                iter[i+j] ++;
             }
         }
 
@@ -3432,24 +3411,17 @@ fem2d_err fem2d_XCSRGMM
 
         i = row[node_index];
         ugpmm[i] += qptr[FEM2D_INDEX_V33];
-        iter[i] ++;
         
         pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V3];
-        debug_body( "node: %d, pos in vertex patch: %d",
-                    node_index, pos_vpatch);
 
         j = ea.vpatch_p[node_index].node_order[pos_vpatch];
-        debug_body("offset from diagonal in sparse array: %d", j);
         other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
-        err_check( FEM2D_INDEX_V3 != ea.vpatch_p[node_index].vert_index[pos_vpatch], 
-                   clean_up, "%s", "Wrong vertex index encountered!");
 
         if (other_vertex == FEM2D_INDEX_V1)
         {
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3469,9 +3441,7 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
-                iter[i+j] ++;
             }
         }
         else
@@ -3479,7 +3449,6 @@ fem2d_err fem2d_XCSRGMM
             if (j>0)
             {
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
-                iter[i+j] ++;
             }
 
             if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
@@ -3499,25 +3468,12 @@ fem2d_err fem2d_XCSRGMM
             }
             if(j>0)
             {
-                debug_body( "offset from diagonal in sparse array: %d", j);
                 ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
-                iter[i+j] ++;
             }
         }
     }
 
     /* === */ 
-    for (i = 0; i < ea.nr_nodes; i++ )
-    {
-        for (j = row[i]; j < row[i+1]; j++ )
-        {
-            debug_print( "iter[%d][%d]: %d (%s X %s)",
-                         i, col[j], iter[j], 
-                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[i].point_enum),
-                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[col[j]].point_enum));
-        }
-    }
-    matlib_free(iter);
 
     debug_exit("Exit Status: %s", "SUCCESS" );
     return FEM2D_SUCCESS;
@@ -3525,8 +3481,253 @@ fem2d_err fem2d_XCSRGMM
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
+}
 
 
+fem2d_err fem2d_ZCSRGMM
+(
+    fem2d_ea        ea,
+    matlib_zv       q,
+    matlib_index*   row,                     
+    matlib_index*   col,                     
+    matlib_complex* ugpmm                   
+)
+{
+    debug_enter("nr nodes: %d, q: %d", ea.len, q.len);
+
+    err_check(    (ea.elem_p   == NULL) 
+               || (ea.vpatch_p == NULL)
+               || (q.elem_p    == NULL), clean_up, 
+               "%s", "Null pointer(s) encountered!");
+
+    err_check( ea.len * FEM2D_NR_COMBI != q.len, clean_up,
+               "%s: Dimension mistmatch (q: %d, required size: %d)!",
+               q.len, ea.len * FEM2D_NR_COMBI);
+
+    fem2d_te* dptr;
+    matlib_complex* qptr = q.elem_p;
+    
+    matlib_index i, pos_vpatch, other_vertex, node_index;
+    matlib_int j;
+
+    for (i = 0; i < row[ea.nr_nodes]; i++ )
+    {
+        ugpmm[i] = 0.0;
+    }
+    for ( dptr = ea.elem_p; dptr < ea.elem_p + ea.len;
+          dptr++, qptr += FEM2D_NR_COMBI)
+    {
+        debug_body("Domain: %d", dptr->domain_index);
+
+        node_index = dptr->nindex_p[FEM2D_INDEX_V1];
+
+        i = row[node_index];
+        ugpmm[i] += qptr[FEM2D_INDEX_V11];
+        
+        pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V1];
+
+        j = ea.vpatch_p[node_index].node_order[pos_vpatch];
+        other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
+
+        if (other_vertex == FEM2D_INDEX_V2)
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            }
+        }
+        else
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            }
+        }
+        /* ======== */
+        
+        node_index = dptr->nindex_p[FEM2D_INDEX_V2];
+
+        i = row[node_index];
+        ugpmm[i] += qptr[FEM2D_INDEX_V22];
+        
+        pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V2];
+        debug_body( "node: %d, pos in vertex patch: %d",
+                    node_index, pos_vpatch);
+
+        j = ea.vpatch_p[node_index].node_order[pos_vpatch];
+        other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
+
+        if (other_vertex == FEM2D_INDEX_V3)
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            }
+        }
+        else
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V12];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
+            }
+        }
+
+        /* ======== */
+        
+        node_index = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        i = row[node_index];
+        ugpmm[i] += qptr[FEM2D_INDEX_V33];
+        
+        pos_vpatch = dptr->pos_vpatch[FEM2D_INDEX_V3];
+
+        j = ea.vpatch_p[node_index].node_order[pos_vpatch];
+        other_vertex = ea.vpatch_p[node_index].bvert_index[pos_vpatch];
+
+        if (other_vertex == FEM2D_INDEX_V1)
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
+            }
+        }
+        else
+        {
+            if (j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V23];
+            }
+
+            if (ea.vpatch_p[node_index].point_enum == FEM2D_INTERIOR)
+            {
+                if (pos_vpatch < (ea.vpatch_p[node_index].len - 1))
+                {
+                    j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+                }
+                else
+                {
+                    j = ea.vpatch_p[node_index].node_order[0];
+                }
+            }
+            else
+            {
+                j = ea.vpatch_p[node_index].node_order[pos_vpatch + 1];
+            }
+            if(j>0)
+            {
+                ugpmm[i + j] += qptr[FEM2D_INDEX_V13];
+            }
+        }
+    }
+
+    /* === */ 
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
 }
 
 
@@ -3607,7 +3808,6 @@ clean_up:
 }
 
 /*============================================================================*/
-#if 1
 fem2d_err fem2d_xm_sparse_GMM
 /* Real - Assemble Global Mass Matrix*/ 
 (
@@ -3621,13 +3821,13 @@ fem2d_err fem2d_xm_sparse_GMM
                  "length of phi: %d",
                  Q.lenc, Q.lenr, phi.len);
     
-    err_check( Q.lenr != FEM2D_NR_COMBI, clean_up,
+    err_check( Q.lenc != FEM2D_NR_COMBI, clean_up,
                "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
                Q.lenc, Q.lenr, FEM2D_NR_COMBI);
 
     err_check( (Q.lenr * ea.len != phi.len), clean_up,
                "Dimension mismatch (phi: %d, require size: %d)!", 
-               phi.len, Q.lenc * ea.nr_nodes);
+               phi.len, Q.lenr * ea.len);
 
     matlib_index nnz = fem2d_get_nnz(ea);
     debug_body( "nr. of non-zero elements: %d", nnz);
@@ -3682,6 +3882,121 @@ fem2d_err fem2d_xm_sparse_GMM
                "%s", "Failed to get the sparsity structure of the mass-matrix!");
 
     error = fem2d_XCSRGMM( ea, q, M->rowIn, M->colIn, M->elem_p);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to compute the mass-matrix!");
+
+    
+    matlib_free(q.elem_p);
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    if (mcnt == 4)
+    {
+        matlib_free(M->elem_p);
+        mcnt--;
+    }
+    if (mcnt == 3)
+    {
+        matlib_free(M->colIn);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(M->rowIn);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(q.elem_p);
+    }
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}
+
+fem2d_err fem2d_zm_sparse_GMM
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
+    matlib_xm         Q,
+    matlib_zv         phi,
+    matlib_zm_sparse* M
+)
+{
+    debug_enter( "size of Q: %d-by-%d), "
+                 "length of phi: %d",
+                 Q.lenc, Q.lenr, phi.len);
+    
+    err_check( Q.lenc != FEM2D_NR_COMBI, clean_up,
+               "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
+               Q.lenc, Q.lenr, FEM2D_NR_COMBI);
+
+    err_check( (Q.lenr * ea.len != phi.len), clean_up,
+               "Dimension mismatch (phi: %d, require size: %d)!", 
+               phi.len, Q.lenr * ea.len);
+
+    matlib_index nnz = fem2d_get_nnz(ea);
+    debug_body( "nr. of non-zero elements: %d", nnz);
+    err_check( nnz == 0, clean_up, "%s", 
+               "Number of non-zero elements of the mass-matrix is inconsistent!");
+
+    matlib_index i, mcnt = 0;
+    fem2d_err error;
+    
+    matlib_zv q;
+    error = matlib_create_zv( Q.lenc * ea.len, &q, MATLIB_COL_VECT);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to allocate memory for the inner product array!");
+    mcnt++; /* 1 */ 
+    matlib_real alpha, beta = 0.0;
+
+    matlib_index COMPLEX_DIM = 2;
+    matlib_xm q_tmp = { .lenc   = Q.lenc, 
+                        .lenr   = COMPLEX_DIM,
+                        .order  = MATLIB_ROW_MAJOR,
+                        .op     = MATLIB_NO_TRANS,
+                        .elem_p = (matlib_real*)q.elem_p};
+    matlib_xm phi_tmp = { .lenc   = Q.lenr, 
+                          .lenr   = COMPLEX_DIM,
+                          .order  = MATLIB_ROW_MAJOR,
+                          .op     = MATLIB_NO_TRANS,
+                          .elem_p = (matlib_real*)phi.elem_p};
+
+    for ( i = 0; i < ea.len; 
+          i++, (phi_tmp.elem_p) += (COMPLEX_DIM * Q.lenr), (q_tmp.elem_p) += (COMPLEX_DIM * Q.lenc))
+    {
+        alpha = ea.elem_p[i].jacob;
+        error = matlib_xgemm(alpha, Q, phi_tmp, beta, q_tmp );
+        err_check( (error == FEM2D_FAILURE), clean_up, 
+                   "%s", "Failed to compute inner-products!");
+    }
+    
+    M->lenc   = ea.nr_nodes;
+    M->lenr   = ea.nr_nodes;
+    
+    M->rowIn  = calloc( ea.nr_nodes + 1, sizeof(matlib_index));
+    err_check( (M->rowIn == NULL), clean_up, 
+               "%s", "Failed to allocate memory for the row array!");
+    mcnt++; /* 2 */ 
+
+    M->colIn  = calloc(   nnz, sizeof(matlib_index));
+    err_check( (M->colIn == NULL), clean_up,
+               "%s", "Failed to allocate memory for the column array!");
+    mcnt++; /* 3 */ 
+    
+    M->elem_p = calloc(   nnz, sizeof(matlib_complex));
+    err_check( (M->elem_p == NULL), clean_up,
+               "%s", "Failed to allocate memory for the sparse matrix entries!");
+    mcnt++; /* 4 */ 
+
+
+    error = fem2d_GMMSparsity( ea, M->rowIn, M->colIn);
+    err_check( (error == FEM2D_FAILURE), clean_up, 
+               "%s", "Failed to get the sparsity structure of the mass-matrix!");
+
+    error = fem2d_ZCSRGMM( ea, q, M->rowIn, M->colIn, M->elem_p);
     err_check( (error == FEM2D_FAILURE), clean_up, 
                "%s", "Failed to compute the mass-matrix!");
 
@@ -3783,7 +4098,6 @@ clean_up:
     debug_exit("Exit Status: %s", "FAILURE" );
     return FEM2D_FAILURE;
 }
-#endif
 /*============================================================================*/
 fem2d_err fem2d_getmesh
 (

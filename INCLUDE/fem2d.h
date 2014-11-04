@@ -308,7 +308,7 @@ matlib_real fem2d_check_quadP
 fem2d_err fem2d_xprj
 (
     fem2d_ea  ea,
-    matlib_xv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_xv u_qnodes,
     matlib_xm quadP,
     matlib_xv u_prj
 );
@@ -316,49 +316,52 @@ fem2d_err fem2d_xprj
 fem2d_err fem2d_zprj
 (
     fem2d_ea  ea,
-    matlib_zv u_qnodes, /* values at the quadrature nodes */ 
+    matlib_zv u_qnodes,
     matlib_xm quadP,
     matlib_zv u_prj
 );
 
+/* function operating on nodal basis representation 
+ * */ 
 fem2d_err fem2d_NB_xprj
 (
     fem2d_ea  ea,
-    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv u_nodes,
     matlib_xv u_prj
 );
 
 fem2d_err fem2d_NB_zprj
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_nodes,
     matlib_zv u_prj
 );
 
 matlib_real fem2d_NB_xnormL2
 (
     fem2d_ea  ea,
-    matlib_xv u_nodes /* values at the nodes */ 
+    matlib_xv u_nodes 
 );
 
 matlib_real fem2d_NB_znormL2
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes /* values at the nodes */ 
+    matlib_zv u_nodes
 );
 
 matlib_real fem2d_NB_xiprod
 (
     fem2d_ea  ea,
-    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv u_nodes,
     matlib_xv v_nodes
 );
 matlib_complex fem2d_NB_ziprod
 (
     fem2d_ea  ea,
-    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_nodes,
     matlib_zv v_nodes
 );
+/* ======== */ 
 
 fem2d_err fem2d_quadM
 (
@@ -399,6 +402,14 @@ fem2d_err fem2d_XCSRGMM
     matlib_real*    ugpmm                   
 );
 
+fem2d_err fem2d_ZCSRGMM
+(
+    fem2d_ea        ea,
+    matlib_zv       q,
+    matlib_index*   row,                     
+    matlib_index*   col,                     
+    matlib_complex* ugpmm                   
+);
 
 fem2d_err fem2d_xm_sparse_GMM
 /* Real - Assemble Global Mass Matrix*/ 
@@ -408,6 +419,16 @@ fem2d_err fem2d_xm_sparse_GMM
     matlib_xv         phi,
     matlib_xm_sparse* M
 );
+
+fem2d_err fem2d_zm_sparse_GMM
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
+    matlib_xm         Q,
+    matlib_zv         phi,
+    matlib_zm_sparse* M
+);
+
 fem2d_err fem2d_XCSRGMM1
 (
     fem2d_ea      ea,
