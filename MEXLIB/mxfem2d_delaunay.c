@@ -216,5 +216,5 @@ void mexFunction
     }
 
     triangledeinit(&m, &b);
-    //free(tlist_tmp);
+    free(tlist_tmp);
 }

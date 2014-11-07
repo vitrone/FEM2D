@@ -8,9 +8,9 @@
 #include "mkl.h"
 #include "mkl_types.h"
 #include "mkl_spblas.h"
+#include "mkl_pardiso.h"
 
-
-//#define NDEBUG
+#define NDEBUG
 #define MATLIB_NTRACE_DATA
 
 #include "fem2d.h"
@@ -2451,7 +2451,7 @@ fem2d_err Gaussian_zfunc
     for ( ptr = nodes_tmp.elem_p; 
           ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
     {
-        *uptr = exp(-5.0 * (1.0 + I)* (ptr[0]*ptr[0] + ptr[1] * ptr[1]));
+        *uptr = cexp(-5.0 * (1.0 + I*1.0) * (ptr[0]*ptr[0] + ptr[1] * ptr[1]));
     }
     debug_exit("exit status: %d", FEM2D_SUCCESS);
     return FEM2D_SUCCESS;
@@ -2476,8 +2476,8 @@ fem2d_err Gaussian_zfunc2
     for ( ptr = nodes_tmp.elem_p; 
           ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
     {
-        *uptr =   exp(-5.0 * (1.0 + I)* (ptr[0]*ptr[0] + ptr[1] * ptr[1])) 
-                * exp(I*2*(ptr[0]+ptr[1]));
+        *uptr =   cexp(-5.0 * (1.0 + I*1.0)* (ptr[0]*ptr[0] + ptr[1] * ptr[1])) 
+                * cexp(I*2.0*(ptr[0]+ptr[1]));
     }
     debug_exit("exit status: %d", FEM2D_SUCCESS);
     return FEM2D_SUCCESS;
@@ -2529,7 +2529,7 @@ fem2d_err poly_odd_zfunc
     for ( ptr = nodes_tmp.elem_p; 
           ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
     {
-        *uptr = pow(ptr[0], 3) * ptr[1] * exp(I*2*(ptr[0]+ptr[1]));
+        *uptr = pow(ptr[0], 3) * ptr[1] * cexp(I*2.0*(ptr[0]+ptr[1]));
     }
     debug_exit("exit status: %d", FEM2D_SUCCESS);
     return FEM2D_SUCCESS;
@@ -2754,7 +2754,7 @@ void test_ziprod(void)
     error = poly_odd_zfunc(x_qnodes, v_qnodes);
 
     matlib_complex iprod = fem2d_ziprod(ea, u_qnodes, v_qnodes, quadW);
-    debug_body("Inner product: %0.16f% 0.16fi", iprod);
+    debug_body("Inner product: %0.16f%+0.16fi", iprod);
 
     CU_ASSERT_TRUE(cabs(iprod) < TOL);
 
@@ -2936,10 +2936,10 @@ void test_zprj(void)
     matlib_complex iprod = 0;
     for (matlib_index i = 0; i < my_nodes.len; i++)
     {
-        iprod += (u_prj.elem_p[i] * v_nodes.elem_p[i]);
+        iprod += (u_prj.elem_p[i] * conj(v_nodes.elem_p[i]));
     }
 
-    debug_body("Inner product: %0.16g% 0.16gi", iprod);
+    debug_body("Inner product: %0.16g%+0.16gi", iprod);
     CU_ASSERT_TRUE(cabs(iprod)<TOL);
 
     matlib_free(quadP.elem_p);
@@ -3142,7 +3142,7 @@ void test_NB_ziprod(void)
     error = poly_odd_zfunc(my_nodes, v_nodes);
 
     matlib_complex iprod = fem2d_NB_ziprod(ea, u_nodes, v_nodes);
-    debug_body("Inner product: %0.16g% 0.16gi", iprod);
+    debug_body("Inner product: %0.16g%+0.16gi", iprod);
 
     CU_ASSERT_TRUE(cabs(iprod) < TOL);
 
@@ -3171,8 +3171,7 @@ void test_NB_zprj(void)
     matlib_zv u_nodes;
     error = matlib_create_zv( my_nodes.len, &u_nodes , MATLIB_COL_VECT);
 
-    /* f(x,y) = exp(-5(x^2+y^2))*/ 
-    error = Gaussian_zfunc(my_nodes, u_nodes);
+    error = Gaussian_zfunc2(my_nodes, u_nodes);
 
     matlib_zv v_nodes;
     error = matlib_create_zv( my_nodes.len, &v_nodes , MATLIB_COL_VECT);
@@ -3188,10 +3187,10 @@ void test_NB_zprj(void)
     matlib_complex iprod = 0;
     for (matlib_index i = 0; i < my_nodes.len; i++)
     {
-        iprod += (u_prj.elem_p[i] * v_nodes.elem_p[i]);
+        iprod += (u_prj.elem_p[i] * conj(v_nodes.elem_p[i]));
     }
 
-    debug_body("Inner product: %0.16g% 0.16gi", iprod);
+    debug_body("Inner product: %0.16g%+0.16gi", iprod);
 
     CU_ASSERT_TRUE(cabs(iprod) < TOL);
 
@@ -3511,6 +3510,126 @@ void test_xGMM_b(void)
 
 }
 
+void test_xGMM_c(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    /* quadW: quadrature weights */ 
+    matlib_index D = 10;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+    fem2d_symq(D, &xi_D, &quadW);
+
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi_D, &vphi);
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    
+    matlib_xv u_nodes, u_exact, v_qnodes;
+    error = matlib_create_xv( my_nodes.len,  &u_nodes, MATLIB_COL_VECT);
+    error = matlib_create_xv( my_nodes.len,  &u_exact, MATLIB_COL_VECT);
+    error = matlib_create_xv( x_qnodes.len, &v_qnodes, MATLIB_COL_VECT);
+
+    error = Gaussian_xfunc(my_nodes, u_exact);
+    error = Gaussian_xfunc(x_qnodes, v_qnodes);
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( my_nodes.len, &u_prj , MATLIB_COL_VECT);
+
+
+    matlib_xm Q, quadP;
+    error = fem2d_quadM( vphi, quadW, &Q);
+    error = fem2d_quadP( vphi, quadW, &quadP);
+    
+    matlib_xv phi;
+    error = matlib_create_xv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = (1.0 + x_qnodes.elem_p[i]);
+        v_qnodes.elem_p[i] = v_qnodes.elem_p[i] * phi.elem_p[i];
+    }
+    matlib_xm_sparse M;
+    error = fem2d_xm_sparse_GMM( ea, Q, phi, &M);
+
+    error = fem2d_xprj(ea, v_qnodes, quadP, u_prj);
+
+    /* Initialize solver data */ 
+    pardiso_solver_t data = { .nsparse  = 1, 
+                              .mnum     = 1, 
+                              .mtype    = PARDISO_REAL_SYM_PDEF,
+                              .sol_enum = PARDISO_LHS, 
+                              .smat_p   = (void*)&M,
+                              .rhs_p    = (void*)&u_prj,
+                              .sol_p    = (void*)&u_nodes};
+
+    debug_body("%s", "Solver data initialized");
+    data.phase_enum = PARDISO_INIT;
+    matlib_pardiso(&data);
+
+    data.phase_enum = PARDISO_ANALYSIS_AND_FACTOR;
+    matlib_pardiso(&data);
+
+    data.phase_enum = PARDISO_SOLVE_AND_REFINE;
+    matlib_pardiso(&data);
+
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < u_nodes.len; i++ )
+        {
+            debug_print( "[%d]-> u_nodes: %0.16f, u_exact: %0.16f",
+                         i, u_nodes.elem_p[i], u_exact.elem_p[i]);
+        }
+    END_DEBUG
+
+    matlib_real norm_actual = matlib_xnrm2(u_exact);
+    matlib_xaxpy(-1.0, u_nodes, u_exact);
+    matlib_real e_relative = matlib_xnrm2(u_exact)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative < 6*TOL);
+    
+    data.phase_enum = PARDISO_FREE;
+    matlib_pardiso(&data);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(u_prj.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(v_qnodes.elem_p);
+    matlib_free(u_nodes.elem_p);
+    matlib_free(u_exact.elem_p);
+    matlib_free(quadW.elem_p);
+    matlib_free(quadP.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+
+}
+
+
+
 void test_zGMM_a(void)
 {
     fem2d_err error = FEM2D_SUCCESS;
@@ -3563,7 +3682,7 @@ void test_zGMM_a(void)
         {
             for (j = M.rowIn[i]; j < M.rowIn[i+1]; j++)
             {
-                debug_print( "GMM[%d][%d]: %0.16f% 0.16fi",
+                debug_print( "GMM[%d][%d]: %0.16f%+0.16fi",
                              i, M.colIn[j], M.elem_p[j]);
             }
         }
@@ -3576,19 +3695,19 @@ void test_zGMM_a(void)
 
     matlib_zcsrsymv(MATLIB_UPPER, M, u_nodes, u_prj1);
 
+    matlib_complex alpha = -1.0-1.0*I; 
     BEGIN_DEBUG
         matlib_index i;
         for (i = 0; i < u_prj.len; i++ )
         {
             debug_print( "[%d]-> |u_prj - u_prj1|: %0.16f",
-                         i, fabs(u_prj.elem_p[i] - u_prj1.elem_p[i]));
+                         i, cabs(alpha * u_prj.elem_p[i] + u_prj1.elem_p[i]));
         }
     END_DEBUG
 
 
     matlib_real norm_actual = matlib_znrm2(u_prj);
     /* scale the projection by the value of the constant potential */ 
-    matlib_complex alpha = -1.0-1.0*I; 
     matlib_zaxpy(alpha, u_prj, u_prj1);
     matlib_real e_relative = matlib_znrm2(u_prj1)/norm_actual;
 
@@ -3679,7 +3798,7 @@ void test_zGMM_b(void)
     matlib_real e_relative = matlib_znrm2(u_prj1)/norm_actual;
 
     debug_body("Relative error: %0.16g", e_relative);
-    CU_ASSERT_TRUE(e_relative < 8*TOL);
+    CU_ASSERT_TRUE(e_relative < 2*TOL_NB);
 
     matlib_free(M.elem_p);
     matlib_free(M.rowIn);
@@ -3695,6 +3814,897 @@ void test_zGMM_b(void)
     fem2d_free_ea(ea);
 
 }
+/*============================================================================*/
+/* Solve Poisson's equation to test the stiffness-matrix routine.
+ *
+ * div(gard u) + rho = 0 with natural buondary conditions.
+ *
+ * rho = 4*a*exp(-a*(x^2 + y^2))*(1 - a*x^2 - a*y^2)
+ *
+ * Solution: u = exp(-a(x^2+y^2))
+ *
+ * */ 
+
+matlib_real fem2d_NB_xnorm_sH1
+(
+    fem2d_ea  ea,
+    matlib_xv S,
+    matlib_xv u_nodes /* values at the nodes */ 
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (S.elem_p       == NULL)
+               || (u_nodes.elem_p == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_nodes.len != ea.nr_nodes) 
+               || (S.len       != ea.len * FEM2D_NR_COMBI), clean_up, 
+               "Dimension mis-match (u_nodes: %d, nr nodes: %d, S: %d)!",
+               u_nodes.len, ea.nr_nodes, S.len);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_real* uptr0 = u_nodes.elem_p; /* base address */ 
+    matlib_real* sptr  = S.elem_p;
+    matlib_real* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_real f1, f2, f3;
+    matlib_real f11, f12, f13, f23, f22, f33;
+
+    matlib_real sum = 0;
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); dptr++, sptr += FEM2D_NR_COMBI)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = *uptr;
+        uptr = uptr0 + offset2; f2 = *uptr;
+        uptr = uptr0 + offset3; f3 = *uptr;
+
+        f11 = 2 * f1 * f1 * jacob;
+        f22 = 2 * f2 * f2 * jacob;
+        f33 = 2 * f3 * f3 * jacob;
+
+        f12 = 4 * (f1 * f2) * jacob;
+        f13 = 4 * (f1 * f3) * jacob;
+        f23 = 4 * (f2 * f3) * jacob;
+        
+        sum += (   sptr[FEM2D_INDEX_V11] * f11
+                 + sptr[FEM2D_INDEX_V12] * f12 
+                 + sptr[FEM2D_INDEX_V13] * f13 
+                 + sptr[FEM2D_INDEX_V22] * f22 
+                 + sptr[FEM2D_INDEX_V23] * f23 
+                 + sptr[FEM2D_INDEX_V33] * f33 );
+
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return sqrt(sum);
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_NAN;
+
+} /* End of fem2d_NB_xnormL2 */ 
+
+fem2d_err fem2d_NB_xprj_sH1
+/* Projection from nodal basis representation */ 
+(
+    fem2d_ea  ea,
+    matlib_xv S,
+    matlib_xv u_nodes, /* values at the nodes */ 
+    matlib_xv u_prj
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (u_prj.elem_p   == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check(    (u_nodes.len != ea.nr_nodes) 
+               || (u_prj.len   != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, u_prj: %d, nr nodes: %d)!",
+               u_nodes.len, u_prj.len, ea.nr_nodes);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_real* uptr0     = u_nodes.elem_p; /* base address */ 
+    matlib_real* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_real* sptr  = S.elem_p;
+    matlib_real* uprj_ptr;
+    matlib_real* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_real f1, f2, f3;
+
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); 
+          dptr++, sptr += FEM2D_NR_COMBI)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = 2.0 * *uptr * jacob;
+        uptr = uptr0 + offset2; f2 = 2.0 * *uptr * jacob;
+        uptr = uptr0 + offset3; f3 = 2.0 * *uptr * jacob;
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset1;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V11] * f1
+                         + sptr[FEM2D_INDEX_V12] * f2
+                         + sptr[FEM2D_INDEX_V13] * f3);
+        
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset2;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V12] * f1
+                         + sptr[FEM2D_INDEX_V22] * f2
+                         + sptr[FEM2D_INDEX_V23] * f3);
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset3;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V13] * f1
+                         + sptr[FEM2D_INDEX_V23] * f2
+                         + sptr[FEM2D_INDEX_V33] * f3);
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2d_NB_xprj */ 
+
+fem2d_err fem2d_NB_zprj_sH1
+(
+    fem2d_ea  ea,
+    matlib_xv S,
+    matlib_zv u_nodes, /* values at the nodes */ 
+    matlib_zv u_prj
+)
+{
+    debug_enter( "nr of domains: %d", ea.len);
+    
+    err_check(    (ea.elem_p      == NULL)    
+               || (u_nodes.elem_p == NULL)
+               || (u_prj.elem_p   == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
+
+    err_check( (u_nodes.len != ea.nr_nodes), clean_up, 
+               "Dimension mis-match (u_nodes: %d, nr nodes: %d)!",
+               u_nodes.len, ea.nr_nodes);
+
+    fem2d_te* dptr; /* domain pointer */
+    
+    matlib_complex* uptr0     = u_nodes.elem_p; /* base address */ 
+    matlib_complex* uprj_ptr0 = u_prj.elem_p; /* base address */ 
+    matlib_real*    sptr      = S.elem_p;
+    matlib_complex* uprj_ptr;
+    matlib_complex* uptr;
+    matlib_index offset1, offset2, offset3;
+    matlib_real jacob;
+    matlib_complex f1, f2, f3;
+
+    /* Clear the existing values */
+    for ( uprj_ptr = uprj_ptr0; 
+          uprj_ptr < uprj_ptr0 + u_prj.len; uprj_ptr++)
+    {
+        *uprj_ptr = 0.0;
+    }
+
+
+    for ( dptr = ea.elem_p; 
+          dptr < (ea.len + ea.elem_p); 
+          dptr++, sptr += FEM2D_NR_COMBI)
+    {
+        jacob = dptr->jacob;
+        
+        /* Get the first vertex */ 
+
+        offset1 = dptr->nindex_p[FEM2D_INDEX_V1];
+        offset2 = dptr->nindex_p[FEM2D_INDEX_V2];
+        offset3 = dptr->nindex_p[FEM2D_INDEX_V3];
+
+        uptr = uptr0 + offset1; f1 = 2.0 * *uptr * jacob;
+        uptr = uptr0 + offset2; f2 = 2.0 * *uptr * jacob;
+        uptr = uptr0 + offset3; f3 = 2.0 * *uptr * jacob;
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset1;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V11] * f1
+                         + sptr[FEM2D_INDEX_V12] * f2
+                         + sptr[FEM2D_INDEX_V13] * f3);
+        
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset2;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V12] * f1
+                         + sptr[FEM2D_INDEX_V22] * f2
+                         + sptr[FEM2D_INDEX_V23] * f3);
+
+        /* ===== */ 
+        uprj_ptr = uprj_ptr0 + offset3;
+        
+        (*uprj_ptr) += (   sptr[FEM2D_INDEX_V13] * f1
+                         + sptr[FEM2D_INDEX_V23] * f2
+                         + sptr[FEM2D_INDEX_V33] * f3);
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+} /* End of fem2d_NB_zprj */ 
+
+
+
+
+
+
+
+
+void test_NB_xnorm_sH1(void)
+/* 
+ * Gradient of exp(-a*(x^2+y^2))
+ * -2*a*x*exp(-a*(x^2 + y^2))
+ * -2*a*y*exp(-a*(x^2 + y^2))
+ *
+ * */ 
+{
+
+fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    matlib_xv u_nodes;
+    error = matlib_create_xv( my_nodes.len, &u_nodes , MATLIB_COL_VECT);
+
+    error = Gaussian_xfunc(my_nodes, u_nodes);
+
+    matlib_xv S;
+    error = fem2d_SI_coeff( ea, &S);
+
+    matlib_real semi_norm = fem2d_NB_xnorm_sH1(ea, S, u_nodes);
+    debug_body("Semi norm: %0.16g", semi_norm);
+
+    matlib_real snorm_actual = sqrt(M_PI);
+
+    matlib_real e_relative = fabs(semi_norm-snorm_actual)/snorm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative < 9.5*TOL_NB);
+}
+
+void test_xGSM_a(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    /* quadW: quadrature weights */ 
+    matlib_index D = 10;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+    fem2d_symq(D, &xi_D, &quadW);
+
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi_D, &vphi);
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    
+    matlib_xv u_nodes;
+    error = matlib_create_xv( my_nodes.len,  &u_nodes, MATLIB_COL_VECT);
+
+    error = Gaussian_xfunc(my_nodes, u_nodes);
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( my_nodes.len, &u_prj , MATLIB_COL_VECT);
+
+    matlib_xv S;
+    error = fem2d_SI_coeff( ea, &S);
+
+    error = fem2d_NB_xprj_sH1(ea, S, u_nodes, u_prj);
+
+    matlib_xv phi;
+    error = matlib_create_xv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = 1.0;
+    }
+    matlib_xm_sparse M;
+    error = fem2d_xm_sparse_GSM( ea, S, quadW, phi, &M);
+
+    matlib_xv u_prj1;
+    error = matlib_create_xv( my_nodes.len, &u_prj1 , MATLIB_COL_VECT);
+
+    matlib_xcsrsymv(MATLIB_UPPER, M, u_nodes, u_prj1);
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < u_prj.len; i++ )
+        {
+            debug_print( "[%d]-> u_prj: %0.16f,  u_prj1: %0.16f",
+                         i, u_prj.elem_p[i], u_prj1.elem_p[i]);
+        }
+    END_DEBUG
+
+    matlib_real norm_actual = matlib_xnrm2(u_prj);
+    matlib_xaxpy(-1.0, u_prj, u_prj1);
+    matlib_real e_relative = matlib_xnrm2(u_prj1)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative < 8*TOL);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(u_prj.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(u_nodes.elem_p);
+    matlib_free(quadW.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+
+}
+
+
+void test_zGSM_a(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    /* quadW: quadrature weights */ 
+    matlib_index D = 10;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+    fem2d_symq(D, &xi_D, &quadW);
+
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi_D, &vphi);
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    
+    matlib_zv u_nodes;
+    error = matlib_create_zv( my_nodes.len,  &u_nodes, MATLIB_COL_VECT);
+
+    error = Gaussian_zfunc(my_nodes, u_nodes);
+    DEBUG_PRINT_ZV(u_nodes, "%s", "");
+
+    matlib_zv u_prj;
+    error = matlib_create_zv( my_nodes.len, &u_prj , MATLIB_COL_VECT);
+
+    matlib_xv S;
+    error = fem2d_SI_coeff( ea, &S);
+
+    error = fem2d_NB_zprj_sH1(ea, S, u_nodes, u_prj);
+
+    matlib_zv phi;
+    error = matlib_create_zv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = 1.0 + I*1.0;
+    }
+    matlib_zm_sparse M;
+    error = fem2d_zm_sparse_GSM( ea, S, quadW, phi, &M);
+
+    matlib_zv u_prj1;
+    error = matlib_create_zv( my_nodes.len, &u_prj1 , MATLIB_COL_VECT);
+
+    matlib_zcsrsymv(MATLIB_UPPER, M, u_nodes, u_prj1);
+    matlib_complex alpha = -1.0-1.0*I; 
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < u_prj.len; i++ )
+        {
+            debug_print( "[%d]-> u_prj: %0.16f%+0.16fi, u_prj1: %0.16f%+0.16fi", i, 
+                    creal(u_prj.elem_p[i]),
+                    cimag(u_prj.elem_p[i]),
+                    creal(u_prj1.elem_p[i]),
+                    cimag(u_prj1.elem_p[i]));
+        }
+    END_DEBUG
+
+    matlib_real norm_actual = matlib_znrm2(u_prj);
+    matlib_zaxpy(alpha, u_prj, u_prj1);
+    matlib_real e_relative = matlib_znrm2(u_prj1)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative < 8*TOL);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(u_prj.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(u_nodes.elem_p);
+    matlib_free(quadW.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+
+}
+
+
+/*============================================================================*/
+
+
+
+fem2d_err field_xfunc
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = exp(-16.0 * (ptr[0]*ptr[0] + ptr[1] * ptr[1]));
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+
+fem2d_err rho_xfunc
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    matlib_real a = 16.0, arg;
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        arg = a * (ptr[0]*ptr[0] + ptr[1] * ptr[1]);
+        *uptr = 4.0 * a * exp(-arg) * (1.0 - arg);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+fem2d_err field_xfunc1
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = sin(M_PI*ptr[0])*sin(M_PI*ptr[1]);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+
+fem2d_err rho_xfunc1
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+
+    matlib_real factor = 2.0*M_PI*M_PI;
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = factor*sin(M_PI*ptr[0])*sin(M_PI*ptr[1]);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+/* - 2*a^2 - 2*b^2 + 2*x^2 + 2*y^2 
+ * */    
+
+fem2d_err field_xfunc2
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+    matlib_real a = 1.0, b = 1.0; 
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = (ptr[0]*ptr[0] - a*a) * (ptr[1]*ptr[1] - b*b);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+
+fem2d_err rho_xfunc2
+(
+    fem2d_cc nodes_tmp, 
+    matlib_xv u_nodes
+)
+{
+    debug_enter( "nodes: %d, u_nodes: %d", 
+                 nodes_tmp.len, u_nodes.len);
+    err_check(( nodes_tmp.len != u_nodes.len), clean_up, 
+                "Dimension mismatch (nodes: %d, u_nodes: %d)!", 
+                nodes_tmp.len, u_nodes.len);
+    matlib_real* ptr;
+    matlib_real* uptr = u_nodes.elem_p;
+
+    matlib_real a = 1.0, b = 1.0; 
+    for ( ptr = nodes_tmp.elem_p; 
+          ptr < (nodes_tmp.elem_p + 2 * (nodes_tmp.len)); ptr+=2, uptr++)
+    {
+        *uptr = - 2.0 * (ptr[0]*ptr[0] - a*a) - 2.0 * (ptr[1]*ptr[1] - b*b);
+    }
+    debug_exit("exit status: %d", FEM2D_SUCCESS);
+    return FEM2D_SUCCESS;
+clean_up:
+    debug_exit("exit status: %d", FEM2D_FAILURE);
+    return FEM2D_FAILURE;
+}
+
+
+void test_xGSM_b(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    matlib_index mcnt = 0;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    /* quadW: quadrature weights */ 
+    matlib_index D = 4;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+    fem2d_symq(D, &xi_D, &quadW);
+
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi_D, &vphi);
+    
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+    
+    matlib_xv u_nodes, v_qnodes;
+    error = matlib_create_xv( my_nodes.len,  &u_nodes, MATLIB_COL_VECT);
+    error = matlib_create_xv( x_qnodes.len, &v_qnodes, MATLIB_COL_VECT);
+
+    error = field_xfunc2(my_nodes, u_nodes);
+    error = rho_xfunc2(x_qnodes, v_qnodes);
+#if 1
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < ea.nr_nodes; i++ )
+        {
+            debug_print( "%s, (x1: %0.5f, x2: %0.5f), u_nodes[%d]: %0.16f", 
+                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[i].point_enum),
+                         my_nodes.elem_p[2*i+0], my_nodes.elem_p[2*i+1],
+                         i, u_nodes.elem_p[i]);
+        }
+    END_DEBUG
+#endif
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( my_nodes.len, &u_prj , MATLIB_COL_VECT);
+
+
+    matlib_xm quadP;
+    error = fem2d_quadP( vphi, quadW, &quadP);
+    
+    error = fem2d_xprj(ea, v_qnodes, quadP, u_prj);
+
+    matlib_xv S;
+    error = fem2d_SI_coeff( ea, &S);
+
+    matlib_xv phi;
+    error = matlib_create_xv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = 1.0;
+    }
+    matlib_xm_sparse M;
+    error = fem2d_xm_sparse_GSM( ea, S, quadW, phi, &M);
+
+    matlib_xv u_prj1;
+    error = matlib_create_xv( my_nodes.len, &u_prj1 , MATLIB_COL_VECT);
+
+    matlib_xcsrsymv(MATLIB_UPPER, M, u_nodes, u_prj1);
+#if 1
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < ea.nr_nodes; i++ )
+        {
+            debug_print( "%s, [%d]-> u_prj: %0.16f,  u_prj1: %0.16f", 
+                         FEM2D_POINT_T_ENUM2STR(ea.vpatch_p[i].point_enum),
+                         i, u_prj.elem_p[i], u_prj1.elem_p[i]);
+        }
+    END_DEBUG
+#endif
+    matlib_real norm_actual = matlib_xnrm2(u_prj);
+    matlib_xaxpy(-1.0, u_prj, u_prj1);
+    matlib_real e_relative = matlib_xnrm2(u_prj1)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative < TOL_NB);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(u_prj.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(v_qnodes.elem_p);
+    matlib_free(u_nodes.elem_p);
+    matlib_free(quadW.elem_p);
+    matlib_free(quadP.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+
+}
+
+void test_xGSM_c(void)
+{
+    fem2d_err error = FEM2D_SUCCESS;
+
+    matlib_index nr_domains;
+    matlib_nv iv;
+    fem2d_cc my_nodes;
+    char* file_name = "mesh_data.bin";
+    fem2d_getmesh(file_name, &my_nodes, &iv);
+    nr_domains = iv.len/FEM2D_NV;
+
+    /* ea: element array */ 
+    fem2d_ea ea;
+    error = fem2d_create_ea(my_nodes, iv.elem_p, nr_domains, &ea);
+    error = fem2d_create_vp(&ea);
+
+    /* vphi: matrix containing values of reference basis functions at 
+     * quadrature points
+     * */ 
+    /* quadW: quadrature weights */ 
+    matlib_index D = 3;
+    matlib_xv quadW;
+    fem2d_cc xi_D;
+    fem2d_symq(D, &xi_D, &quadW);
+
+    matlib_xm vphi;
+    error = fem2d_refbasis(xi_D, &vphi);
+
+    /* x_qnodes: mesh points for interpolation 
+     * */ 
+    fem2d_cc x_qnodes;
+    error = fem2d_ref2mesh(ea, vphi, &x_qnodes);
+
+    matlib_xv v_qnodes, u_nodes, u_exact;
+    error = matlib_create_xv( x_qnodes.len, &v_qnodes, MATLIB_COL_VECT);
+    error = matlib_create_xv( my_nodes.len, &u_nodes , MATLIB_COL_VECT);
+    error = matlib_create_xv( my_nodes.len, &u_exact , MATLIB_COL_VECT);
+
+    error = rho_xfunc2(x_qnodes, v_qnodes);
+    error = field_xfunc2(my_nodes, u_exact);
+
+    matlib_xv u_prj;
+    error = matlib_create_xv( my_nodes.len, &u_prj , MATLIB_COL_VECT);
+
+    matlib_xm quadP;
+    error = fem2d_quadP( vphi, quadW, &quadP );
+
+    error = fem2d_xprj(ea, v_qnodes, quadP, u_prj);
+
+    matlib_xv S;
+    error = fem2d_SI_coeff( ea, &S);
+
+    matlib_xv phi;
+    error = matlib_create_xv( x_qnodes.len, &phi , MATLIB_COL_VECT);
+
+    matlib_index i;
+    for (i = 0; i < x_qnodes.len; i++)
+    {
+        phi.elem_p[i] = 1.0;
+
+    }
+    matlib_xm_sparse M;
+    error = fem2d_xm_sparse_GSM( ea, S, quadW, phi, &M);
+
+    /* Initialize solver data */ 
+    pardiso_solver_t data = { .nsparse  = 1, 
+                              .mnum     = 1, 
+                              .mtype    = PARDISO_REAL_SYM_INDEF,
+                              .sol_enum = PARDISO_LHS, 
+                              .smat_p   = (void*)&M,
+                              .rhs_p    = (void*)&u_prj,
+                              .sol_p    = (void*)&u_nodes};
+
+    debug_body("%s", "Solver data initialized");
+    data.phase_enum = PARDISO_INIT;
+    matlib_pardiso(&data);
+
+    data.phase_enum = PARDISO_ANALYSIS_AND_FACTOR;
+    matlib_pardiso(&data);
+
+    data.phase_enum = PARDISO_SOLVE_AND_REFINE;
+    matlib_pardiso(&data);
+#if 1
+    BEGIN_DEBUG
+        matlib_index i;
+        for (i = 0; i < u_nodes.len; i++ )
+        {
+            debug_print( "[%d]-> u_nodes: %0.16f, u_exact: %0.16f",
+                         i, u_nodes.elem_p[i], u_exact.elem_p[i]);
+        }
+    END_DEBUG
+#endif
+
+    matlib_real norm_actual = matlib_xnrm2(u_exact);
+    matlib_xaxpy(-1.0, u_nodes, u_exact);
+    matlib_real e_relative = matlib_xnrm2(u_exact)/norm_actual;
+
+    debug_body("Relative error: %0.16g", e_relative);
+    CU_ASSERT_TRUE(e_relative<TOL);
+    
+    data.phase_enum = PARDISO_FREE;
+    matlib_pardiso(&data);
+
+    matlib_free(M.elem_p);
+    matlib_free(M.rowIn);
+    matlib_free(M.colIn);
+
+    matlib_free(u_nodes.elem_p);
+    matlib_free(u_exact.elem_p);
+    matlib_free(u_prj.elem_p);
+    matlib_free(x_qnodes.elem_p);
+    matlib_free(vphi.elem_p);
+    fem2d_free_ea(ea);
+}
+
+
+
 /*============================================================================+/
  |  
  | 
@@ -3717,34 +4727,39 @@ int main()
     CU_TestInfo test_array[] = 
     {
 #if 1
-        { "Create vertex patch a"      , test_create_vp  },
-        { "Create vertex patch b"      , test_create_vp1 },
-        { "Create index array"         , test_create_ia  },
-        { "Centroid a"                 , test_centroid_a },
-        { "Centroid b"                 , test_centroid_b },
-        { "Ref. basis"                 , test_refbasis   },
-        { "Ref. to mesh"               , test_ref2mesh   },
-        { "Interpolation real"         , test_xinterp    },
-        { "Interpolation complex a"    , test_zinterp_a  },
-        { "Interpolation complex b"    , test_zinterp_b  },
-        { "L2 norm real"               , test_xnormL2    },
-        { "L2 norm complex"            , test_znormL2    },
-        { "Inner product real"         , test_xiprod     },
-        { "Inner product complex"      , test_ziprod     },
-        { "Quad. matrix, projection"   , test_quadP      },
-        { "Projection real"            , test_xprj       },
-        { "Projection complex"         , test_zprj       },
-        { "L2 norm NB real"            , test_NB_xnormL2 },
-        { "L2 norm NB complex"         , test_NB_znormL2 },
-        { "Inner product NB real"      , test_NB_xiprod  },
-        { "Inner product NB complex"   , test_NB_ziprod  },
-        { "Projection NB real"         , test_NB_xprj    },
-        { "Projection NB complex"      , test_NB_zprj    },
-        { "Quad. matrix, GMM"          , test_quadM      },
+        { "Create vertex patch a"      , test_create_vp   },
+        { "Create vertex patch b"      , test_create_vp1  },
+        { "Create index array"         , test_create_ia   },
+        { "Centroid a"                 , test_centroid_a  },
+        { "Centroid b"                 , test_centroid_b  },
+        { "Ref. basis"                 , test_refbasis    },
+        { "Ref. to mesh"               , test_ref2mesh    },
+        { "Interpolation real"         , test_xinterp     },
+        { "Interpolation complex a"    , test_zinterp_a   },
+        { "Interpolation complex b"    , test_zinterp_b   },
+        { "L2 norm real"               , test_xnormL2     },
+        { "L2 norm complex"            , test_znormL2     },
+        { "Inner product real"         , test_xiprod      },
+        { "Inner product complex"      , test_ziprod      },
+        { "Quad. matrix, projection"   , test_quadP       },
+        { "Projection real"            , test_xprj        },
+        { "Projection complex"         , test_zprj        },
+        { "L2 norm NB real"            , test_NB_xnormL2  },
+        { "L2 norm NB complex"         , test_NB_znormL2  },
+        { "Inner product NB real"      , test_NB_xiprod   },
+        { "Inner product NB complex"   , test_NB_ziprod   },
+        { "Projection NB real"         , test_NB_xprj     },
+        { "Projection NB complex"      , test_NB_zprj     },
+        { "Quad. matrix, GMM"          , test_quadM       },
         { "GMM real a"                 , test_xGMM_a      },
         { "GMM real b"                 , test_xGMM_b      },
+        { "GMM real c"                 , test_xGMM_c      },
         { "GMM complex a"              , test_zGMM_a      },
         { "GMM complex b"              , test_zGMM_b      },
+        { "Semi-norm H1 real"          , test_NB_xnorm_sH1},
+        { "GSM real a"                 , test_xGSM_a      },
+        { "GSM real b"                 , test_xGSM_b      },
+        { "GSM complex a"              , test_zGSM_a      },
 #endif
         CU_TEST_INFO_NULL,
     };

@@ -197,11 +197,17 @@ typedef struct
 
 typedef enum
 {
+    MATLIB_SPARSE_UNKNOWN,
     MATLIB_CSR,
     MATLIB_CSC, 
-    MATLIB_COO
 
 } MATLIB_SPARSE;
+
+#define MATLIB_SPARSE_ENUM2STR(format)                       \
+    (format == MATLIB_CSR ? "Compressed Row":                \
+     (format == MATLIB_CSC ? "Compressed Column": "UNKNOWN"))
+
+
 
 typedef enum
 {
@@ -267,6 +273,7 @@ typedef struct
 #define matlib_free(ptr)                                                 \
     do{ if(ptr!=NULL)                                                    \
         free((void*) ptr);                                               \
+        ptr = NULL;                                                      \
       } while (0)
 
 #define DEBUG_PRINT_XV(NAME, fmt,...)                                    \
@@ -500,6 +507,12 @@ matlib_real matlib_xdot
 (
     const matlib_xv x,
     const matlib_xv y
+);
+
+matlib_complex matlib_xzdot
+(
+    const matlib_xv x,
+    const matlib_zv y
 );
 
 /*============================================================================+/

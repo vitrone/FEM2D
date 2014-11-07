@@ -133,6 +133,7 @@ SOURCES = triangle.c      \
 	  triangle_debug.c\
 	  fem2d.c         \
 	  matlib.c        \
+	  matlib_solver.c \
 	  matlib_io.c     \
 	  jacobi.c        \
 	  sym_quad.c

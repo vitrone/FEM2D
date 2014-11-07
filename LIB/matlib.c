@@ -158,7 +158,7 @@ matlib_err matlib_create_xm
     M->order = order_enum;
     M->op    = op_enum;
 
-    errno  = 0;
+    errno = 0;
     M->elem_p = calloc( lenc * lenr, sizeof(matlib_real));
     err_check( (M->elem_p == NULL), clean_up, 
                "%s: Memory allocation for real matrix of size %d-by-%d failed!", 
@@ -172,6 +172,219 @@ clean_up:
     return MATLIB_FAILURE;
     
 }
+
+matlib_err matlib_create_xm_sparse
+( 
+    matlib_index lenc,
+    matlib_index lenr,
+    matlib_index nnz,
+    matlib_xm_sparse* M,
+    MATLIB_SPARSE format
+)
+{
+    debug_enter( "Allocate memory for real sparse matrix "
+                 "(size: %d-by-%d, nnz: %d, format: %s).",
+                 lenc, lenr, nnz,
+                 MATLIB_SPARSE_ENUM2STR(format));
+
+    matlib_index mcnt = 0;
+    M->lenc   = lenc;
+    M->lenr   = lenr;
+    M->format = format;
+
+    if (format == MATLIB_CSR)
+    {
+        errno = 0;
+        M->rowIn  = calloc( lenc + 1, sizeof(matlib_index));
+        err_check( (M->rowIn == NULL), clean_up, 
+                   "%s: Failed to allocate memory for the row array (length: %d)!",
+                   strerror(errno), lenc + 1);
+        mcnt++; /* 1 */ 
+        M->rowIn[lenc] = nnz;
+
+        errno = 0;
+        M->colIn  = calloc( nnz, sizeof(matlib_index));
+        err_check( (M->colIn == NULL), clean_up,
+                   "%s: Failed to allocate memory for the column array (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 2 */ 
+        
+        errno = 0;
+        M->elem_p = calloc( nnz, sizeof(matlib_real));
+        err_check( (M->elem_p == NULL), clean_up,
+                   "%s: Failed to allocate memory for the sparse matrix entries (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 3 */ 
+    }
+    else if (format == MATLIB_CSC)
+    {
+        errno = 0;
+        M->rowIn  = calloc( nnz, sizeof(matlib_index));
+        err_check( (M->rowIn == NULL), clean_up, 
+                   "%s: Failed to allocate memory for the row array (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 1 */ 
+
+        errno = 0;
+        M->colIn  = calloc( lenr + 1, sizeof(matlib_index));
+        err_check( (M->colIn == NULL), clean_up,
+                   "%s: Failed to allocate memory for the column array (length: %d)!",
+                   strerror(errno), lenr + 1);
+        mcnt++; /* 2 */ 
+        M->colIn[lenr] = nnz;
+        
+        errno = 0;
+        M->elem_p = calloc( nnz, sizeof(matlib_real));
+        err_check( (M->elem_p == NULL), clean_up,
+                   "%s: Failed to allocate memory for the sparse matrix entries (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 3 */ 
+    }
+    else
+    {
+        M->elem_p = NULL;
+        M->rowIn  = NULL;
+        M->colIn  = NULL;
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return MATLIB_SUCCESS;
+
+clean_up:
+    if (mcnt == 3)
+    {
+        matlib_free(M->elem_p);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(M->colIn);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(M->rowIn);
+        mcnt--;
+    }
+    M->elem_p = NULL;
+    M->rowIn  = NULL;
+    M->colIn  = NULL;
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_FAILURE;
+
+    
+}
+
+
+matlib_err matlib_create_zm_sparse
+( 
+    matlib_index lenc,
+    matlib_index lenr,
+    matlib_index nnz,
+    matlib_zm_sparse* M,
+    MATLIB_SPARSE format
+)
+{
+    debug_enter( "Allocate memory for complex sparse matrix "
+                 "(size: %d-by-%d, nnz: %d, format: %s).",
+                 lenc, lenr, nnz,
+                 MATLIB_SPARSE_ENUM2STR(format));
+
+    matlib_index mcnt = 0;
+    M->lenc   = lenc;
+    M->lenr   = lenr;
+    M->format = format;
+
+    if (format == MATLIB_CSR)
+    {
+        errno = 0;
+        M->rowIn  = calloc( lenc + 1, sizeof(matlib_index));
+        err_check( (M->rowIn == NULL), clean_up, 
+                   "%s: Failed to allocate memory for the row array (length: %d)!",
+                   strerror(errno), lenc + 1);
+        mcnt++; /* 1 */ 
+        M->rowIn[lenc] = nnz;
+
+        errno = 0;
+        M->colIn  = calloc( nnz, sizeof(matlib_index));
+        err_check( (M->colIn == NULL), clean_up,
+                   "%s: Failed to allocate memory for the column array (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 2 */ 
+        
+        errno = 0;
+        M->elem_p = calloc( nnz, sizeof(matlib_complex));
+        err_check( (M->elem_p == NULL), clean_up,
+                   "%s: Failed to allocate memory for the sparse matrix entries (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 3 */ 
+    }
+    else if (format == MATLIB_CSC)
+    {
+        errno = 0;
+        M->rowIn  = calloc( nnz, sizeof(matlib_index));
+        err_check( (M->rowIn == NULL), clean_up, 
+                   "%s: Failed to allocate memory for the row array (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 1 */ 
+
+        errno = 0;
+        M->colIn  = calloc( lenr + 1, sizeof(matlib_index));
+        err_check( (M->colIn == NULL), clean_up,
+                   "%s: Failed to allocate memory for the column array (length: %d)!",
+                   strerror(errno), lenr + 1);
+        mcnt++; /* 2 */ 
+        M->colIn[lenr] = nnz;
+        
+        errno = 0;
+        M->elem_p = calloc( nnz, sizeof(matlib_complex));
+        err_check( (M->elem_p == NULL), clean_up,
+                   "%s: Failed to allocate memory for the sparse matrix entries (length: %d)!",
+                   strerror(errno), nnz);
+        mcnt++; /* 3 */ 
+    }
+    else
+    {
+        M->elem_p = NULL;
+        M->rowIn  = NULL;
+        M->colIn  = NULL;
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return MATLIB_SUCCESS;
+
+clean_up:
+    if (mcnt == 3)
+    {
+        matlib_free(M->elem_p);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(M->colIn);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(M->rowIn);
+        mcnt--;
+    }
+    M->elem_p = NULL;
+    M->rowIn  = NULL;
+    M->colIn  = NULL;
+
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return MATLIB_FAILURE;
+
+    
+}
+
+
+
+
+
+
 /*============================================================================+/
  | Utility Functions
  +============================================================================*/
@@ -201,7 +414,8 @@ matlib_err matlib_xcopy
                "Dimension mis-match (x.len: %d, y.len: %d)!",
                x.len, y.len);
 
-    err_check( ((x.elem_p == NULL) || (y.elem_p == NULL)), clean_up, 
+    err_check(    (x.elem_p == NULL) 
+               || (y.elem_p == NULL), clean_up, 
                "%s", "Null pointers encountered!");
 
     cblas_dcopy(x.len, x.elem_p, incx, y.elem_p, incy);
@@ -234,7 +448,8 @@ matlib_err matlib_zcopy
                "Dimension mis-match (x.len: %d, y.len: %d)!",
                x.len, y.len);
 
-    err_check( ((x.elem_p == NULL) || (y.elem_p == NULL)), clean_up, 
+    err_check(    (x.elem_p == NULL) 
+               || (y.elem_p == NULL), clean_up, 
                "%s", "Null pointers encountered!");
     
     cblas_zcopy(x.len, x.elem_p, incx, y.elem_p, incy);
@@ -303,7 +518,8 @@ matlib_err matlib_xaxpy
     err_check( (x.len != y.len), clean_up, 
                "Dimension mis-match (x.len: %d, y.len: %d)!",
                x.len, y.len);
-    err_check( ((x.elem_p == NULL) || (y.elem_p == NULL)), clean_up, 
+    err_check(    (x.elem_p == NULL) 
+               || (y.elem_p == NULL), clean_up, 
                "%s", "Null pointers encountered!");
 
     cblas_daxpy(x.len, alpha, x.elem_p, incx, y.elem_p, incy);
@@ -336,7 +552,8 @@ matlib_err matlib_zaxpy
     err_check( (x.len != y.len), clean_up, 
                "Dimension mis-match (x.len: %d, y.len: %d)!",
                x.len, y.len);
-    err_check( ((x.elem_p == NULL) || (y.elem_p == NULL)), clean_up, 
+    err_check(    (x.elem_p == NULL) 
+               || (y.elem_p == NULL), clean_up, 
                "%s", "Null pointers encountered!");
 
     cblas_zaxpy(x.len, &alpha, x.elem_p, incx, y.elem_p, incy);
@@ -409,11 +626,40 @@ matlib_real matlib_xdot
                "Dimension mis-match (x.len: %d, y.len: %d)!",
                x.len, y.len);
 
-    debug_exit("exit status: %d", MATLIB_SUCCESS);
     matlib_real r = cblas_ddot(x.len, x.elem_p, incx, y.elem_p, incy);
 
     debug_exit("Exit Status: %s", "SUCCESS");
     return r;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_NAN;
+}
+
+matlib_complex matlib_xzdot
+(
+    const matlib_xv x,
+    const matlib_zv y
+)
+/* DOT
+ * y <- a * x + y
+ *
+ * */
+{
+    debug_enter( "length of vectors: %d, %d", x.len, y.len);
+    matlib_index incx = 1;
+    matlib_index incy = 2;
+
+    err_check( (x.len != y.len), clean_up, 
+               "Dimension mis-match (x.len: %d, y.len: %d)!",
+               x.len, y.len);
+
+    
+    matlib_real r1 = cblas_ddot(x.len, x.elem_p, incx, ((matlib_real*)y.elem_p) + 0, incy);
+    matlib_real r2 = cblas_ddot(x.len, x.elem_p, incx, ((matlib_real*)y.elem_p) + 1, incy);
+
+    debug_exit("Exit Status: %s", "SUCCESS");
+    return (r1+I*r2);
 
 clean_up:
     debug_exit("Exit Status: %s", "FAILURE");

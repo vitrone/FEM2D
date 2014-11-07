@@ -93,13 +93,13 @@ typedef struct
 /* NZE : Non-Zero Elements */ 
 typedef enum
 {
-    FEM2D_GMM_INIT,
+    FEM2D_GSMM_INIT,
     FEM2D_GET_SPARSITY_ONLY,
     FEM2D_GET_NZE_ONLY,
     FEM2D_GET_SPARSITY_NZE,
-    FEM2D_GMM_FREE
+    FEM2D_GSMM_FREE,
 
-} FEM2D_OP_GMM; /* OPTIONS GMM */ 
+} FEM2D_OPT_GSMM; /* OPTIONS GSMM */ 
 
 
 
@@ -429,21 +429,32 @@ fem2d_err fem2d_zm_sparse_GMM
     matlib_zm_sparse* M
 );
 
-fem2d_err fem2d_XCSRGMM1
+fem2d_err fem2d_SI_coeff
+/* Stiffnes Integral Coefficients */ 
 (
-    fem2d_ea      ea,
-    matlib_index* row,                     
-    matlib_index* col,                     
-    matlib_real*  ugpmm                   
+    fem2d_ea   ea,
+    matlib_xv* S
 );
 
-fem2d_err fem2d_xm_sparse_GMM1
+fem2d_err fem2d_xm_sparse_GSM
 /* Real - Assemble Global Mass Matrix*/ 
 (
     fem2d_ea          ea,
+    matlib_xv         S,
+    matlib_xv         quadW,
+    matlib_xv         phi,
     matlib_xm_sparse* M
 );
 
+fem2d_err fem2d_zm_sparse_GSM
+/* Real - Assemble Global Mass Matrix*/ 
+(
+    fem2d_ea          ea,
+    matlib_xv         S,
+    matlib_xv         quadW,
+    matlib_zv         phi,
+    matlib_zm_sparse* M
+);
 
 fem2d_err fem2d_getmesh
 (

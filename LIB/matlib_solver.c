@@ -69,7 +69,7 @@ void matlib_pardiso(pardiso_solver_t* data)
         debug_body("%s", "Start testing PARDISO");
         matlib_index nrhs  = 1; /* Number of right hand sides  */ 
 
-        matlib_index msglvl = 0; /* Prmatlib_index statistical information in file */
+        matlib_index msglvl = 0; /* Print statistical information in file */
         matlib_int error    = 0; /* Initialize error flag */
         debug_body("nr. sparse matrices: %d", data->nsparse);
         matlib_index maxfct = 1;
@@ -178,7 +178,7 @@ void matlib_pardiso(pardiso_solver_t* data)
     {
         matlib_index nrhs  = 1; /* Number of right hand sides  */ 
 
-        matlib_index msglvl = 0; /* Prmatlib_index statistical information in file */
+        matlib_index msglvl = 0; /* Print statistical information in file */
         matlib_int   error  = 0; /* Initialize error flag */
         matlib_index maxfct = 1;
         matlib_index mnum = 1;
@@ -343,7 +343,7 @@ void matlib_pardiso(pardiso_solver_t* data)
     else if(data->phase_enum == PARDISO_FREE)
     {
 
-        matlib_index msglvl = 0; /* Prmatlib_index statistical information in file */
+        matlib_index msglvl = 0; /* Print statistical information in file */
         matlib_int   error  = 0; /* Initialize error flag */
         matlib_index maxfct = 1;
         matlib_index mnum = 1;

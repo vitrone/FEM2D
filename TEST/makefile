@@ -41,9 +41,10 @@ CFLAGS = $(INCLUDES) -g -ansi -D_GNU_SOURCE -fexceptions -fPIC  \
 
 LDFLAGS = -L../BUILD -L$(MKL_PATH) $(MKL_LIBS) -lpthread -lm -lcunit -lfem2d -lmkl_rt
 
-SOURCES = CUnit_fem2d.c   \
-	  CUnit_matrix.c  \
-	  matlib_io_print.c
+SOURCES = CUnit_fem2d.c         \
+	  CUnit_matrix.c        \
+	  CUnit_pde2d.c          \
+	  matlib_io_print.c     
 
 TSTBIN = BIN
 #OBJECTS = $(SOURCES:%.c=$(TSTBIN)/%.o)
