@@ -132,10 +132,12 @@ SOURCES = triangle.c      \
 	  triangle_check.c\
 	  triangle_debug.c\
 	  fem2d.c         \
+	  fem1d.c         \
 	  matlib.c        \
 	  matlib_solver.c \
 	  matlib_io.c     \
 	  jacobi.c        \
+	  legendre.c      \
 	  sym_quad.c
 
 OBJECTS = $(SOURCES:%.c=$(BUILDDIR)/%.o)
@@ -145,7 +147,9 @@ HLIST = triangle.h \
 	basic.h    \
 	debug.h    \
 	ehandler.h \
-	fem2d.h
+	legendre.h \
+	fem2d.h    \
+	fem1d.h
 
 HEADERS = $(addprefix $(INC_DIR)/, $(HLIST))
 

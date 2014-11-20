@@ -464,6 +464,24 @@ matlib_err matlib_create_xm
     MATLIB_ORDER order_enum,
     MATLIB_OP    op_enum
 );
+
+matlib_err matlib_create_xm_sparse
+( 
+    matlib_index lenc,
+    matlib_index lenr,
+    matlib_index nnz,
+    matlib_xm_sparse* M,
+    MATLIB_SPARSE format
+);
+
+matlib_err matlib_create_zm_sparse
+( 
+    matlib_index lenc,
+    matlib_index lenr,
+    matlib_index nnz,
+    matlib_zm_sparse* M,
+    MATLIB_SPARSE format
+);
 /*============================================================================+/
  |BLAS Level I Routines
 /+============================================================================*/
@@ -858,6 +876,9 @@ void matlib_xzvwrite_csv
 /+============================================================================*/
 
 /*=====================[Linear solver based on PARDISO]=======================*/
+
+#define PARDISO_MSGLVL (0)
+
 #ifdef MATLIB_64
     #define _MATLIB_PARDISO PARDISO_64 
 #else
@@ -874,22 +895,35 @@ void matlib_xzvwrite_csv
 
 #define _E_PARDISO_REAL_SYM_INDEF  (-2)
 #define _E_PARDISO_REAL_SYM_PDEF   ( 2)
-#define _E_PARDISO_COMPLEX_SYM     ( 6)
+#define _E_PARDISO_REAL_UNSYM      (11)
+
+#define _E_PARDISO_COMPLEX_HERM_PDEF     ( 4)
+#define _E_PARDISO_COMPLEX_HERM_INDEF    (-4)
+#define _E_PARDISO_COMPLEX_SYM           ( 6)
+#define _E_PARDISO_COMPLEX_UNSYM         (13)
+
+#define _E_PARDISO_RHS (1)
+#define _E_PARDISO_LHS (0)
 
 typedef enum
 {
+    PARDISO_SOLVEC_UNKNOWN,
     PARDISO_RHS,
     PARDISO_LHS
 
 } PARDISO_SOLVEC;
 
+#define PARDISO_SOLVEC_ENUM2STR(sol_enum)  \
+    (PARDISO_RHS == sol_enum ? "RHS":      \
+     (PARDISO_LHS == sol_enum ? "LHS": "UNKNOWN"))
+
 typedef enum
 {
-    PARDISO_INIT                = -2,
-    PARDISO_FREE                = -1, /* release all memory */ 
-    PARDISO_FREE_LU             = 0,
-    PARDISO_ANALYSIS_AND_FACTOR = 12,
-    PARDISO_SOLVE_AND_REFINE    = 33
+    PARDISO_INIT               ,
+    PARDISO_FREE               , /* release all memory */ 
+    PARDISO_FREE_LU            ,
+    PARDISO_ANALYSIS_AND_FACTOR,
+    PARDISO_SOLVE_AND_REFINE    
 
 } PARDISO_PHASE;
 
@@ -902,16 +936,25 @@ typedef enum
 
 typedef enum
 {
-    PARDISO_REAL_SYM_INDEF = -2,
-    PARDISO_REAL_SYM_PDEF  =  2,
-    PARDISO_COMPLEX_SYM    =  6
+    PARDISO_MTYPE_UNKNOWN     ,
+    PARDISO_REAL_SYM_INDEF    ,
+    PARDISO_REAL_SYM_PDEF     ,
+    PARDISO_REAL_UNSYM        ,
+    PARDISO_COMPLEX_HERM_PDEF ,
+    PARDISO_COMPLEX_HERM_INDEF,
+    PARDISO_COMPLEX_SYM       ,
+    PARDISO_COMPLEX_UNSYM     
 
 } PARDISO_MTYPE;
 
-#define PARDISO_MTYPE_ENUM2STR(mtype)                                \
-    (PARDISO_REAL_SYM_INDEF == ? "REAL SYMMETRIC INDEFINITE":        \
-     (PARDISO_REAL_SYM_PDEF  == ? "REAL SYMMTERIC POSITIVE DEFINITE":\
-      (PARDISO_COMPLEX_SYM    == ? "COMPLEX SYMMTERIC":"UNKNOWN")))
+#define PARDISO_MTYPE_ENUM2STR(mtype)                                              \
+    (PARDISO_REAL_SYM_INDEF == mtype ? "REAL SYMMETRIC INDEFINITE":                \
+     (PARDISO_REAL_SYM_PDEF == mtype ? "REAL SYMMETRIC POSITIVE DEFINITE":         \
+      (PARDISO_REAL_UNSYM == mtype ? "REAL UNSYMMETRIC":                           \
+       (PARDISO_COMPLEX_SYM == mtype ? "COMPLEX SYMMETRIC":                        \
+        (PARDISO_COMPLEX_HERM_PDEF == mtype? "COMPLEX HERMITIAN POSITIVE DEFINITE":\
+         (PARDISO_COMPLEX_HERM_INDEF == mtype? "COMPLEX HERMITIAN INDEFINITE":     \
+          (PARDISO_COMPLEX_UNSYM == mtype ? "COMPLEX UNSYMMETRIC":"UNKNOWN")))))))
 
 typedef struct
 {
@@ -928,6 +971,9 @@ typedef struct
     void*          sol_p;  /* vector struct        */ 
 
 } pardiso_solver_t;
+
+matlib_err matlib_xpardiso(pardiso_solver_t* data);
+matlib_err matlib_zpardiso(pardiso_solver_t* data);
 
 void matlib_pardiso(pardiso_solver_t* data);
 

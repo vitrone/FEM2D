@@ -66,11 +66,23 @@ void mexFunction
     /* Turn on exact arithmetic */
     b.noexact = 0;
 
-    b.convex = 1;
+    b.convex   = 1;
+    b.quality  = 1;
+    b.minangle = 30;
     b.usesegments = b.poly || b.refine || b.quality || b.convex;
+    b.goodangle = cos(b.minangle * M_PI / 180.0);
+    if (b.goodangle == 1.0) 
+    {
+        b.offconstant = 0.0;
+    } 
+    else 
+    {
+        b.offconstant = 0.475 * sqrt((1.0 + b.goodangle) / (1.0 - b.goodangle));
+    }
+    b.goodangle *= b.goodangle;
 
     /* Pass more options */ 
-    if(nrhs==2)
+    if (nrhs == 2)
     {
         int mxarray_index = 1;
         const char *fnames[] = { "algorithm", 
@@ -85,10 +97,10 @@ void mexFunction
         {
             mexErrMsgTxt("Not enough input fields!");
         }
-        for( j=0; j<NF; j++)
+        for ( j=0; j<NF; j++)
         {
             fnum = mxGetFieldNumber(prhs[mxarray_index], fnames[j]);
-            if(fnum==-1)
+            if (fnum == -1)
             {
                 char my_str[30];
                 sprintf(my_str, "Missing field: %s:", fnames[j]);
@@ -102,7 +114,7 @@ void mexFunction
 
 
         int algorithm = (int) mxGetScalar(mxInput[0]);
-        switch(algorithm)
+        switch (algorithm)
         {
             case 1:
                 b.sweepline   = 1;

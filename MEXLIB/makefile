@@ -52,7 +52,9 @@ SOURCES = tricall.c           \
 	  mxmatlib_gemm.c     \
 	  mxmatlib_io_write.c \
 	  mxmatlib_io_read.c  \
-	  mxfem2d_create_vp.c   
+	  mxfem2d_create_vp.c \
+	  mxLGLdataLT1.c      \
+	  mxfem2d_mesh_quality.c   
 
 
 TARGETS = $(SOURCES:%.c=$(BUILDDIR)/%.mexa64)

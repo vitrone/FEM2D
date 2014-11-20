@@ -1564,10 +1564,12 @@ fem2d_err fem2d_ref2mesh
                  "size of vphi: %d-by-%d", 
                  ea.len, vphi.lenc, vphi.lenr);
 
-    err_check( ((ea.elem_p==NULL) || (vphi.elem_p == NULL)) || (x==NULL), 
-               clean_up, "%s", "Null pointers ecountered!");
+    err_check(    (ea.elem_p   == NULL) 
+               || (vphi.elem_p == NULL) 
+               || (x           == NULL), clean_up, 
+               "%s", "Null pointers ecountered!");
 
-    err_check( (vphi.lenr != FEM2D_NV), clean_up, 
+    err_check( vphi.lenr != FEM2D_NV, clean_up, 
                "Size of second input incorrect (input: %d-by-%d)!",
                vphi.lenc, vphi.lenr);
 
@@ -1667,6 +1669,7 @@ fem2d_err fem2d_xinterp
     debug_enter( "length of u_nodes: %d", 
                  u_nodes.len);
     
+    matlib_index mcnt = 0;
     err_check(    (ea.elem_p      == NULL)   
                || (u_nodes.elem_p == NULL) 
                || (vphi.elem_p    == NULL), clean_up, 
@@ -1687,7 +1690,6 @@ fem2d_err fem2d_xinterp
 
     matlib_index INDEX_REAL = 0;
 
-    matlib_index mcnt = 0;
     matlib_xv u1_tmp;    
     fem2d_err error = matlib_create_xv( FEM2D_NV, &u1_tmp, MATLIB_COL_VECT);
     err_check( (error == FEM2D_FAILURE), clean_up, 
@@ -1775,6 +1777,7 @@ fem2d_err fem2d_zinterp
     debug_enter( "length of u_nodes: %d", 
                  u_nodes.len);
     
+    matlib_index mcnt = 0;
     err_check(    (ea.elem_p      == NULL)   
                || (u_nodes.elem_p == NULL) 
                || (vphi.elem_p    == NULL), clean_up, 
@@ -1797,7 +1800,6 @@ fem2d_err fem2d_zinterp
     matlib_index INDEX_IMAG  = 1;
     matlib_index COMPLEX_DIM = 2; /* Dimension of a compelex plane */ 
 
-    matlib_index mcnt = 0;
     matlib_xm u1_tmp;    
     fem2d_err error = matlib_create_xm( FEM2D_NV, COMPLEX_DIM, &u1_tmp, 
                                         MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
@@ -1999,7 +2001,7 @@ clean_up:
 } /* End of fem2d_xiprod */ 
 
 
-matlib_real fem2d_ziprod 
+matlib_complex fem2d_ziprod 
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
@@ -2029,7 +2031,7 @@ matlib_real fem2d_ziprod
     matlib_complex* uptr = u_qnodes.elem_p;
     matlib_complex* vptr = v_qnodes.elem_p;
     
-    matlib_real iprod = 0;
+    matlib_complex iprod = 0;
     matlib_real jacob;
 
     for ( matlib_index i = 0; i< ea.len; i++)
@@ -2065,6 +2067,10 @@ fem2d_err fem2d_quadP
     err_check(    (vphi.elem_p  == NULL) 
                || (quadW.elem_p == NULL), clean_up, 
                "%s", "Null pointer ecountered!");
+
+    err_check( vphi.lenc != quadW.len, clean_up, 
+               "Dimension mismatch (vphi: %d-by-%d, quadW: %d)!",
+               vphi.lenc, vphi.lenr, quadW.len);
 
     fem2d_err error; 
     error = matlib_create_xm( FEM2D_NV, vphi.lenc, quadP, 
@@ -2239,6 +2245,7 @@ fem2d_err fem2d_xprj
                  "quadP: %d-by-%d, ",
                  ea.len, quadP.lenc, quadP.lenr);
     
+    matlib_index mcnt = 0;
     err_check(    (ea.elem_p       == NULL)    
                || (u_qnodes.elem_p == NULL) 
                || (quadP.elem_p    == NULL)  
@@ -2258,7 +2265,6 @@ fem2d_err fem2d_xprj
                          .type   = MATLIB_COL_VECT,
                          .elem_p = u_qnodes.elem_p };
 
-    matlib_index mcnt = 0;
     matlib_xv u2_tmp;    
     fem2d_err error = matlib_create_xv( FEM2D_NV, &u2_tmp, MATLIB_COL_VECT);
     err_check( (error == FEM2D_FAILURE), clean_up, 
@@ -2334,6 +2340,7 @@ fem2d_err fem2d_zprj
                  "quadP: %d-by-%d, ",
                  ea.len, quadP.lenc, quadP.lenr);
     
+    matlib_index mcnt = 0;
     err_check(    (ea.elem_p       == NULL)    
                || (u_qnodes.elem_p == NULL) 
                || (quadP.elem_p    == NULL)  
@@ -2356,7 +2363,6 @@ fem2d_err fem2d_zprj
                          .op     = MATLIB_NO_TRANS,
                          .elem_p = (matlib_real*)u_qnodes.elem_p };
 
-    matlib_index mcnt = 0;
     matlib_xm u2_tmp;    
     fem2d_err error = matlib_create_xm( FEM2D_NV, COMPLEX_DIM, &u2_tmp, 
                                         MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
@@ -2889,6 +2895,7 @@ fem2d_err fem2d_quadM
 {
     debug_enter( "nr of quadrature points: %d", quadW.len);
     
+    matlib_index mcnt = 0;
     err_check(    (vphi.elem_p  == NULL)    
                || (quadW.elem_p == NULL), clean_up, 
                "%s", "Null pointer(s) ecountered!");
@@ -2898,7 +2905,6 @@ fem2d_err fem2d_quadM
                "Dimension mis-match (vphi: %d-by-%d, quadW: %d)!",
                vphi.lenc, vphi.lenr, quadW.len);
 
-    matlib_index mcnt = 0;
     fem2d_err error = matlib_create_xm( FEM2D_NR_COMBI, quadW.len, Q, 
                                         MATLIB_ROW_MAJOR, MATLIB_NO_TRANS);
     err_check( (error == FEM2D_FAILURE), clean_up, 
@@ -2954,11 +2960,11 @@ fem2d_err fem2d_SI_coeff
 )
 {
  
+    matlib_index mcnt = 0;
     err_check(    (ea.elem_p == NULL) 
                || (S         == NULL), clean_up,
                "%s", "Null pointer(s) encountered!");
 
-    matlib_index mcnt = 0;
     fem2d_err error = matlib_create_xv( FEM2D_NR_COMBI * ea.len, S, MATLIB_COL_VECT);
     err_check( (error == FEM2D_FAILURE), clean_up, 
                "%s", "Memory allocation for stiffness integral coeff. vector failed!");
@@ -3811,6 +3817,7 @@ fem2d_err fem2d_xm_sparse_GMM
                  "length of phi: %d",
                  Q.lenc, Q.lenr, phi.len);
     
+    matlib_index i, mcnt = 0;
     err_check( Q.lenc != FEM2D_NR_COMBI, clean_up,
                "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
                Q.lenc, Q.lenr, FEM2D_NR_COMBI);
@@ -3824,7 +3831,6 @@ fem2d_err fem2d_xm_sparse_GMM
     err_check( nnz == 0, clean_up, "%s", 
                "Number of non-zero elements of the mass-matrix is inconsistent!");
 
-    matlib_index i, mcnt = 0;
     fem2d_err error;
     
     matlib_xv q;
@@ -3897,6 +3903,7 @@ fem2d_err fem2d_zm_sparse_GMM
                  "length of phi: %d",
                  Q.lenc, Q.lenr, phi.len);
     
+    matlib_index i, mcnt = 0;
     err_check( Q.lenc != FEM2D_NR_COMBI, clean_up,
                "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
                Q.lenc, Q.lenr, FEM2D_NR_COMBI);
@@ -3910,7 +3917,6 @@ fem2d_err fem2d_zm_sparse_GMM
     err_check( nnz == 0, clean_up, "%s", 
                "Number of non-zero elements of the mass-matrix is inconsistent!");
 
-    matlib_index i, mcnt = 0;
     fem2d_err error;
     
     matlib_zv q;
@@ -3994,6 +4000,7 @@ fem2d_err fem2d_xm_sparse_GSM
                  "length of phi: %d",
                  quadW.len, phi.len);
     
+    matlib_index mcnt = 0;
     err_check( S.len != FEM2D_NR_COMBI * ea.len, clean_up,
                "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
                S.len, FEM2D_NR_COMBI * ea.len);
@@ -4007,7 +4014,6 @@ fem2d_err fem2d_xm_sparse_GSM
     err_check( nnz == 0, clean_up, "%s", 
                "Number of non-zero elements of the mass-matrix is inconsistent!");
 
-    matlib_index mcnt = 0;
     fem2d_err error;
     
     matlib_xv q;
@@ -4090,6 +4096,7 @@ fem2d_err fem2d_zm_sparse_GSM
                  "length of phi: %d",
                  quadW.len, phi.len);
     
+    matlib_index mcnt = 0;
     err_check( S.len != FEM2D_NR_COMBI * ea.len, clean_up,
                "Dimension mismatch (Q: %d-by-%d, nr combi: %d)!", 
                S.len, FEM2D_NR_COMBI * ea.len);
@@ -4103,7 +4110,6 @@ fem2d_err fem2d_zm_sparse_GSM
     err_check( nnz == 0, clean_up, "%s", 
                "Number of non-zero elements of the mass-matrix is inconsistent!");
 
-    matlib_index mcnt = 0;
     fem2d_err error;
     
     matlib_zv q;
@@ -4250,6 +4256,355 @@ clean_up:
 }
 
 /*============================================================================*/
+fem2d_err fem2d_create_mq
+(
+    matlib_index nr_domains,
+    matlib_real  tol,
+    fem2d_mq*    mq
+)
+{
+
+    matlib_index mcnt = 0;
+    mq->len = nr_domains;
+    mq->tol = tol;
+
+    errno = 0;
+    mq->h_max = calloc(mq->len, sizeof(matlib_real));
+    err_check( (mq->h_max == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", mq->len);
+    mcnt++; /* 1 */ 
+
+    errno = 0;
+    mq->angle_max = calloc(mq->len, sizeof(matlib_real));
+    err_check( (mq->angle_max == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", mq->len);
+    mcnt++; /* 2 */
+
+    errno = 0;
+    mq->area = calloc(mq->len, sizeof(matlib_real));
+    err_check( (mq->area == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", mq->len);
+    mcnt++; /* 3 */
+
+    errno = 0;
+    mq->aspect_ratio = calloc(mq->len, sizeof(matlib_real));
+    err_check( (mq->aspect_ratio == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", mq->len);
+    mcnt++; /* 4 */ 
+    
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+    
+clean_up:
+    if (mcnt == 3)
+    {
+        matlib_free(mq->area);
+        mcnt--;
+    }
+    if (mcnt == 2)
+    {
+        matlib_free(mq->angle_max);
+        mcnt--;
+    }
+    if (mcnt == 1)
+    {
+        matlib_free(mq->h_max);
+        mcnt--;
+    }
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}
+
+fem2d_err fem2d_mesh_quality
+(
+    fem2d_ea  ea, 
+    fem2d_mq* mq
+)
+{
+
+    matlib_index mcnt = 0;
+    err_check(    (ea.elem_p        == NULL)
+               || (mq->h_max        == NULL)
+               || (mq->angle_max    == NULL)
+               || (mq->area         == NULL)
+               || (mq->aspect_ratio == NULL), clean_up, 
+               "%s", "Null pointer(s) ecountered!");
+
+    err_check( mq->len != ea.len, clean_up, 
+               "Length mismatch (ea: %d, mq: %d)!", ea.len, mq->len);
+    fem2d_te* dptr = ea.elem_p;
+    
+    matlib_real *vert1, *vert2, *vert3;
+    matlib_real X21, Y21, X31, Y31, X32, Y32;
+    matlib_real A, L12, L23, L31;
+    matlib_real theta1, theta2, theta3;
+    matlib_real h_max, angle_max, aspect_ratio;
+
+    matlib_index i = 0;
+    for ( ; i < mq->len; dptr++, i++)
+    {
+        vert1 = dptr->vert_p[FEM2D_INDEX_V1];
+        vert2 = dptr->vert_p[FEM2D_INDEX_V2];
+        vert3 = dptr->vert_p[FEM2D_INDEX_V3];
+
+        X21 = vert2[FEM2D_INDEX_DIM1] - vert1[FEM2D_INDEX_DIM1];
+        Y21 = vert2[FEM2D_INDEX_DIM2] - vert1[FEM2D_INDEX_DIM2];
+
+        X31 = vert3[FEM2D_INDEX_DIM1] - vert1[FEM2D_INDEX_DIM1];
+        Y31 = vert3[FEM2D_INDEX_DIM2] - vert1[FEM2D_INDEX_DIM2];
+
+        X32 = vert3[FEM2D_INDEX_DIM1] - vert2[FEM2D_INDEX_DIM1];
+        Y32 = vert3[FEM2D_INDEX_DIM2] - vert2[FEM2D_INDEX_DIM2];
+
+        A =   0.5 * fabs(X21 * Y31 - X31 * Y21);
+        if (A < mq->tol)
+        {
+            A = mq->tol;
+        }
+
+        L12 = sqrt(X21 * X21 + Y21 * Y21);
+        L23 = sqrt(X32 * X32 + Y32 * Y32);
+        L31 = sqrt(X31 * X31 + Y31 * Y31);
+
+        h_max = (L12 > L23)? L12: L23;
+        h_max = (L31 > h_max)? L31: h_max;
+
+        aspect_ratio = FEM2D_QFACTOR * h_max * 0.5 * (L12 + L23 + L31)/A;
+        theta1 = FEM2D_ONE_RADIAN * asin((2.0 * A)/(L12 * L31));
+        theta2 = FEM2D_ONE_RADIAN * asin((2.0 * A)/(L23 * L31));
+        theta3 = 180 - theta1 - theta2;
+
+        angle_max = (theta1 > theta2)? theta1: theta2;
+        angle_max = (theta3 > angle_max)? theta3: angle_max;
+
+        mq->h_max[i]        = h_max;
+        mq->angle_max[i]    = angle_max;
+        mq->area[i]         = A;
+        mq->aspect_ratio[i] = aspect_ratio;
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+    
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}
+
+
+/*============================================================================*/
+
+fem2d_err fem2d_create_bn
+(
+    fem2d_ea ea,
+    fem2d_bn *bn
+)
+/* 
+ * Arrange the list of boundary nodes such that the neighbhors are next to each
+ * other.
+ *
+ * */
+{
+    matlib_index mcnt = 0;
+    err_check(    (ea.elem_p   == NULL)
+               || (ea.vpatch_p == NULL), clean_up, 
+               "%s", "Null pointer(s) ecountered!");
+
+    /* Loop through all nodes and find the first boundary node
+     * Also compute the number of boundary nodes to allocate memory for the
+     * list.
+     * */
+    matlib_index index, other_vertex, i;
+    fem2d_vp *vp_ptr, *vp_ptr1 = ea.vpatch_p;
+    while (vp_ptr1->point_enum != FEM2D_BOUNDARY)
+    {
+        vp_ptr1++;
+    }
+    vp_ptr = vp_ptr1;
+
+    i = 0;
+    for ( ; vp_ptr1 < ea.vpatch_p + ea.nr_nodes; vp_ptr1++)
+    {
+        if (vp_ptr1->point_enum == FEM2D_BOUNDARY)
+        {
+            i++;
+        }
+    }
+
+    bn->len = i;
+    errno = 0;
+    bn->nindex_p = calloc( bn->len, sizeof(matlib_index));
+    err_check( (bn->nindex_p == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", bn->len);
+    mcnt++;
+
+
+    bn->nindex_p[0] = vp_ptr->node_index;
+    i = 1;
+    while (i < bn->len)
+    {
+        if (vp_ptr->vert_index[0] < vp_ptr->bvert_index[0])
+        {
+            bn->nindex_p[i] = (vp_ptr->domain_p[0])->nindex_p[vp_ptr->bvert_index[0]];
+        }
+        else
+        {
+            index = vp_ptr->len-1;
+            other_vertex = FEM2D_NV - vp_ptr->vert_index[index] 
+                                    - vp_ptr->bvert_index[index];
+            bn->nindex_p[i] = (vp_ptr->domain_p[index])->nindex_p[other_vertex];
+        }
+        vp_ptr = ea.vpatch_p + bn->nindex_p[i];
+        i++;
+    }
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+    
+clean_up:
+    if (mcnt == 1)
+    {
+        matlib_free(bn->nindex_p);
+    }
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}
+
+fem2d_err fem2d_rect_bn
+(
+    fem2d_ea ea,
+    fem2d_bn *bn,
+    matlib_real* rect_cc,
+    matlib_real tol
+)
+{
+    err_check(    (ea.node_p    == NULL)
+               || (bn->nindex_p == NULL), clean_up, 
+               "%s", "Null pointer(s) ecountered!");
+
+    /* (a,d)         (b,d)
+     *    ___________
+     *   |           | 
+     *   |           |
+     *   |___________|
+     * 
+     * (a, c)         (b,c)
+     *
+     *  rect_cc = {a,c,b,d}
+     * */ 
+
+    matlib_real a = rect_cc[0];
+    matlib_real c = rect_cc[1];
+    matlib_real b = rect_cc[2];
+    matlib_real d = rect_cc[3];
+
+    errno = 0;
+    matlib_index* nindex_p = calloc( bn->len, sizeof(matlib_index));
+    err_check( (nindex_p == NULL), clean_up, 
+               "Memory allocation failed (length: %d)!", bn->len);
+
+    matlib_index i, j, j1, j2, j3, j4;
+    matlib_real x1, x2;
+
+    matlib_real nr_corners = 0;
+    /* Find the corner (b,c) in nindex_p */ 
+    j1 = 0;
+    for (i = 0; i < bn->len; i++)
+    {
+        x1 = ea.node_p[FEM2D_DIM * bn->nindex_p[i] + FEM2D_INDEX_DIM1];
+        x2 = ea.node_p[FEM2D_DIM * bn->nindex_p[i] + FEM2D_INDEX_DIM2];
+        if ((fabs(x1-b) < tol) && ( fabs(x2-c) < tol))
+        {
+            j1 = i;
+            nr_corners++;
+            break;
+        }
+    }
+    err_check( nr_corners != 1, clean_up, 
+               "Either the tolerance is insufficient or "
+               "the mesh is inconsistent (nr corners: %d)!", nr_corners);
+
+    if (j1 != 0)
+    {
+        j = 0;
+        for (i = j1; i < bn->len; i++)
+        {
+                nindex_p[j] = bn->nindex_p[i];
+                j++;
+        }
+        for (i = 0; i < j1;)
+        {
+                nindex_p[j] = bn->nindex_p[i];
+                j++;
+        }
+        matlib_free(bn->nindex_p);
+        bn->nindex_p = nindex_p;
+    }
+    
+    /* (a,d)         (b,d)
+     *    ___________
+     *   |           | 
+     *   |           |
+     *   |___________|
+     * 
+     * (a, c)         (b,c)
+     *
+     *  rect_cc = {a,c,b,d}
+     * */ 
+
+    for ( i = 0; i < bn->len; i++)
+    {
+        x1 = ea.node_p[FEM2D_DIM * bn->nindex_p[i] + FEM2D_INDEX_DIM1];
+        x2 = ea.node_p[FEM2D_DIM * bn->nindex_p[i] + FEM2D_INDEX_DIM2];
+
+        if (fabs(x2-d) < tol)
+        {
+            if ( fabs(x1-b) < tol)
+            {
+                j2 = i;
+                nr_corners++;
+            }
+            else if ( fabs(x1-a) < tol)
+            {
+                j3 =  i;
+                nr_corners++;
+            }
+        }
+        else if (fabs(x2-c) < tol)
+        {
+            if ( fabs(x1-a) < tol)
+            {
+                j4 =  i;
+                nr_corners++;
+            }
+        }
+    }
+    err_check( nr_corners != 4, clean_up, 
+               "Either the tolerance is insufficient or "
+               "the mesh is inconsistent (nr corners: %d)!", nr_corners);
+
+    bn->len_r = j2 + 1;
+    bn->len_t = j3 + 1 - j2;
+    bn->len_l = j4 + 1 - j3;
+    bn->len_b = bn->len - j4;
+
+    debug_exit("Exit Status: %s", "SUCCESS" );
+    return FEM2D_SUCCESS;
+    
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE" );
+    return FEM2D_FAILURE;
+
+}
+
+
+
+
+/*============================================================================*/
+
 #if 0
 fem2d_err fem2d_XCSRGMM1
 (

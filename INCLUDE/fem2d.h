@@ -1,5 +1,5 @@
-#ifndef FEM1D_H
-#define FEM1D_H
+#ifndef FEM2D_H
+#define FEM2D_H
 
 /*============================================================================+/
  | Include all the dependencies
@@ -46,7 +46,6 @@ typedef struct
 {
     matlib_real** vert_p; /* pointer to the vertices */ 
     matlib_index* nindex_p; /* pointer to the node indices forming the triangle */ 
-    matlib_index* vorder_p; 
     matlib_index  domain_index;
     matlib_index* pos_vpatch;
     matlib_real   jacob;
@@ -56,10 +55,6 @@ typedef struct
 
 } fem2d_te; /* triangular element */
 
-/* Define the vertex patch for a given node: TBD
- *
- *
- * */ 
 typedef struct
 {
     matlib_index node_index;
@@ -72,12 +67,26 @@ typedef struct
     fem2d_te**    domain_p;
     matlib_index* vert_index; /* array of vertex order indices */ 
     matlib_int*   node_order;
-    /* index of vertex on the boundary not shared by the next neighbhoiring
+    /* index of vertex on the boundary not shared by the next neighbhoring
      * domain in the vertex patch
      * */ 
     matlib_index* bvert_index; 
 
 } fem2d_vp; /* vertex patch */ 
+
+/* 
+ * xi in [-1, 1]
+ * nodal basis 1D: l0(xi) = (1-xi)/2, l1(1+xi)/2
+ * */ 
+
+
+typedef struct
+{
+    matlib_real   jacob;  /* J = 0.5 * [s^(m)_2 - s^(m)_1]*/ 
+    matlib_index* vert_index; /* array of vertex order indices */ 
+    fem2d_te**    domain_p;
+
+} fem2d_be; /* boundary-elements */ 
 
 typedef struct
 {
@@ -87,8 +96,50 @@ typedef struct
     fem2d_te*    elem_p;
     fem2d_vp*    vpatch_p;
 
+    matlib_index nr_bnodes;
+    matlib_real* snode_p; /* boundary parametrized by arc length s, snodes: s_j*/ 
+    matlib_index* bnindex_p;
+    fem2d_be*    belem_p;
+    matlib_index nr_seg; /* 1 seg: smoooth boundary */ 
+    matlib_index* seg_index;
+
 } fem2d_ea; /* element array type */ 
 
+typedef enum
+{
+    FEM2D_SMOOTH, /* C-infinite */  
+    FEM2D_RECT
+
+} FEM2D_BCURVE;
+
+
+typedef struct
+{
+    FEM2D_BCURVE bcurve;
+    matlib_index len;
+    matlib_index* nindex_p;
+
+    /* Only meant for Rectangular boundary */ 
+    matlib_index len_r;
+    matlib_index len_t;
+    matlib_index len_l;
+    matlib_index len_b;
+
+
+} fem2d_bn; /* boundary-nodes */ 
+
+
+
+typedef struct
+{
+    matlib_index len;
+    matlib_real  tol;
+    matlib_real* h_max;
+    matlib_real* angle_max;
+    matlib_real* area;
+    matlib_real* aspect_ratio;
+
+} fem2d_mq;
 
 /* NZE : Non-Zero Elements */ 
 typedef enum
@@ -280,7 +331,7 @@ matlib_real fem2d_xiprod
     matlib_xv quadW
 );
 
-matlib_real fem2d_ziprod 
+matlib_complex fem2d_ziprod 
 /* Inner product iprod = (u, conj(v))_{\Omega} */ 
 (
     fem2d_ea  ea,
@@ -463,6 +514,35 @@ fem2d_err fem2d_getmesh
     matlib_nv* iv
 );
 
+#define FEM2D_QFACTOR (0.28867513459481286553) 
+#define FEM2D_ONE_RADIAN (57.29577951308232286465)
+
+fem2d_err fem2d_create_mq
+(
+    matlib_index nr_domains,
+    matlib_real  tol,
+    fem2d_mq*    mq
+);
+
+fem2d_err fem2d_mesh_quality
+(
+    fem2d_ea  ea, 
+    fem2d_mq* mq
+);
+
+fem2d_err fem2d_create_bn
+(
+    fem2d_ea ea,
+    fem2d_bn *bn
+);
+
+fem2d_err fem2d_rect_bn
+(
+    fem2d_ea ea,
+    fem2d_bn *bn,
+    matlib_real* rect_cc,
+    matlib_real tol
+);
 /*============================================================================+/
  | Quadrature on triangular domain
 /+============================================================================*/

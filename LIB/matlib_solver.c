@@ -16,6 +16,574 @@
 #include "matlib.h"
 
 /*============================================================================*/
+static inline matlib_err matlib_xmtype
+(
+    PARDISO_MTYPE mtype_enum,
+    matlib_int *mtype
+);
+static inline matlib_err matlib_zmtype
+(
+    PARDISO_MTYPE mtype_enum,
+    matlib_int *mtype
+);
+
+static inline matlib_err matlib_pardiso_init(pardiso_solver_t* data);
+
+static inline matlib_err matlib_xpardiso_AF( pardiso_solver_t* data);
+static inline matlib_err matlib_zpardiso_AF( pardiso_solver_t* data);
+static inline matlib_err matlib_xpardiso_SR( pardiso_solver_t* data);
+static inline matlib_err matlib_zpardiso_SR( pardiso_solver_t* data);
+
+static inline matlib_err matlib_xpardiso_free(pardiso_solver_t* data);
+static inline matlib_err matlib_zpardiso_free(pardiso_solver_t* data);
+/*============================================================================*/
+static inline matlib_err matlib_xmtype
+(
+    PARDISO_MTYPE mtype_enum,
+    matlib_int *mtype
+)
+{
+    matlib_err error = MATLIB_SUCCESS;
+    switch(mtype_enum)
+    {
+        case PARDISO_REAL_SYM_INDEF:
+            *mtype = _E_PARDISO_REAL_SYM_INDEF;
+            break;
+        case PARDISO_REAL_SYM_PDEF:
+            *mtype = _E_PARDISO_REAL_SYM_PDEF;
+            break;
+        case PARDISO_REAL_UNSYM:
+            *mtype = _E_PARDISO_REAL_UNSYM;
+            break;
+        default:
+            *mtype = 0;
+            error = MATLIB_FAILURE;
+    }
+    return error;
+}
+
+static inline matlib_err matlib_zmtype
+(
+    PARDISO_MTYPE mtype_enum,
+    matlib_int *mtype
+)
+{
+    matlib_err error = MATLIB_SUCCESS;
+    switch(mtype_enum)
+    {
+        case PARDISO_COMPLEX_SYM:
+            *mtype = _E_PARDISO_COMPLEX_SYM;
+            break;
+        case PARDISO_COMPLEX_HERM_INDEF:
+            *mtype = _E_PARDISO_COMPLEX_HERM_INDEF;
+            break;
+        case PARDISO_COMPLEX_HERM_PDEF:
+            *mtype = _E_PARDISO_COMPLEX_HERM_PDEF;
+            break;
+        case PARDISO_COMPLEX_UNSYM:
+            *mtype = _E_PARDISO_COMPLEX_UNSYM;
+            break;
+        default:
+            error = MATLIB_FAILURE;
+            *mtype = 0;
+    }
+
+    return error;
+}
+
+static inline matlib_err matlib_pardiso_init(pardiso_solver_t* data)
+{
+    err_check(data == NULL, clean_up, "%s", "Null pointer encountered!");
+    err_check(    (data->iparam == NULL) 
+               || (data->ptr    == NULL), clean_up, 
+               "%s", "Null pointer(s) encountered!");
+
+    matlib_index i;
+    /* SETUP PARDISO CONTROL PARAMETERS */
+    for (i = 0; i < PARDISO_NIPARAM; i++)
+    {
+        data->iparam[i] = 0;
+        data->ptr[i]    = 0;
+    }
+    data->iparam[0] = 1; /* Don't use default values */ 
+    data->iparam[1] = 2; /* Fill-in reducing odering for input matrix */ 
+    data->iparam[3] = 0; /* Preconditioning */ 
+    data->iparam[4] = 0; /*  */ 
+    
+
+    if (data->sol_enum == PARDISO_RHS)
+    {
+        data->iparam[5] = _E_PARDISO_RHS; /* Write solution into b */ 
+    }
+    else if (data->sol_enum == PARDISO_LHS)
+    {
+        data->iparam[5] = _E_PARDISO_LHS; /* Write solution into x */
+    }
+    else
+    {
+        data->sol_enum = PARDISO_SOLVEC_UNKNOWN;
+    }
+
+    err_check( data->sol_enum == PARDISO_SOLVEC_UNKNOWN, clean_up, 
+               "Incorrect option for solution vector (write solution into: %d)", 
+               PARDISO_SOLVEC_ENUM2STR(data->sol_enum));
+
+    data->iparam[7]  = 2; /* Maximum number of iterative refinement steps, output 
+                             reported in iparam[6] */ 
+    data->iparam[9]  = 13; /* Perturbing pivot elements */ 
+    data->iparam[10] = 0;  /* Disable scaling  */ 
+    data->iparam[12] = 0;  /*  */ 
+    data->iparam[17] = -1; /* Disable reporting of nnz  */
+    data->iparam[18] =  1; /*  */ 
+    data->iparam[34] =  1; /* Zero-based indexing  */ 
+    
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+static inline matlib_err matlib_xpardiso_AF(pardiso_solver_t* data)
+{
+    debug_body("%s", "Start testing PARDISO");
+    matlib_int mtype;
+    matlib_index nrhs = 1; /* Number of right hand sides  */ 
+
+    /* Print statistical information in file */
+    matlib_index msglvl = PARDISO_MSGLVL;
+
+    matlib_int error = 0; /* Initialize error flag */
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+    matlib_index maxfct = 1;
+    matlib_index mnum   = 1;
+    matlib_int phase_enum = _E_PARDISO_ANALYSIS_AND_FACTOR;
+
+    matlib_err err = matlib_xmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for real matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+    if (data->nsparse > 1)
+    {
+        
+        matlib_xm_nsparse* smat_p = (matlib_xm_nsparse*) data->smat_p;
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p[data->mnum-1],
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, NULL, NULL,
+                         &error);
+    }
+    else
+    {
+        matlib_xm_sparse* smat_p = (matlib_xm_sparse*) data->smat_p;
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, NULL, NULL,
+                         &error);
+    }
+    err_check( error != 0, clean_up, 
+               "Analysis and factorization failed (error code: %d)", error);
+
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+
+static inline matlib_err matlib_zpardiso_AF(pardiso_solver_t* data)
+{
+    debug_body("%s", "Start testing PARDISO");
+    matlib_int mtype;
+    matlib_index nrhs = 1; /* Number of right hand sides  */ 
+
+    /* Print statistical information in file */
+    matlib_index msglvl = PARDISO_MSGLVL;
+
+    matlib_int error = 0; /* Initialize error flag */
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+    matlib_index maxfct = 1;
+    matlib_index mnum   = 1;
+    matlib_int phase_enum = _E_PARDISO_ANALYSIS_AND_FACTOR;
+
+    matlib_err err = matlib_zmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for complex matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+
+    if (data->nsparse > 1)
+    {
+        
+        matlib_zm_nsparse* smat_p = (matlib_zm_nsparse*) data->smat_p;
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p[data->mnum-1],
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, NULL, NULL,
+                         &error);
+    }
+    else
+    {
+        matlib_zm_sparse* smat_p = (matlib_zm_sparse*) data->smat_p;
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, NULL, NULL,
+                         &error);
+    }
+    err_check( error != 0, clean_up, 
+               "Analysis and factorization failed (error code: %d)", error);
+
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+
+
+/*============================================================================*/
+
+static inline matlib_err matlib_xpardiso_SR(pardiso_solver_t* data)
+{
+    matlib_int mtype;
+    matlib_index nrhs = 1; /* Number of right hand sides  */ 
+
+    /* Print statistical information in file */
+    matlib_index msglvl = PARDISO_MSGLVL; 
+    matlib_int   error  = 0; /* Initialize error flag */
+    matlib_index maxfct = 1;
+    matlib_index mnum = 1;
+
+    matlib_int phase_enum = _E_PARDISO_SOLVE_AND_REFINE;
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+
+    matlib_err err = matlib_xmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for real matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+    if (data->nsparse > 1)
+    {
+        matlib_xm_nsparse* smat_p = (matlib_xm_nsparse*) data->smat_p;
+        matlib_xv* rhs_p = (matlib_xv*) data->rhs_p;
+        matlib_xv* sol_p = (matlib_xv*) data->sol_p;
+
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p[data->mnum-1],
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, 
+                         rhs_p->elem_p, 
+                         sol_p->elem_p,
+                         &error);
+
+    }
+    else
+    {
+        matlib_xm_sparse* smat_p  = (matlib_xm_sparse*) data->smat_p;
+        matlib_xv* rhs_p = (matlib_xv*) data->rhs_p;
+        matlib_xv* sol_p = (matlib_xv*) data->sol_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, 
+                         rhs_p->elem_p, 
+                         sol_p->elem_p,
+                         &error);
+    }
+    err_check( error != 0, clean_up, 
+               "ERROR during solution and refinement (error code: %d)", error);
+
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+
+static inline matlib_err matlib_zpardiso_SR(pardiso_solver_t* data)
+{
+    matlib_int mtype;
+    matlib_index nrhs = 1; /* Number of right hand sides  */ 
+
+    /* Print statistical information in file */
+    matlib_index msglvl = PARDISO_MSGLVL; 
+    matlib_int   error  = 0; /* Initialize error flag */
+    matlib_index maxfct = 1;
+    matlib_index mnum   = 1;
+
+    matlib_int phase_enum = _E_PARDISO_SOLVE_AND_REFINE;
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+
+    matlib_err err = matlib_zmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for complex matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+    if (data->nsparse > 1)
+    {
+        matlib_zm_nsparse* smat_p = (matlib_zm_nsparse*) data->smat_p;
+        matlib_zv* rhs_p = (matlib_zv*) data->rhs_p;
+        matlib_zv* sol_p = (matlib_zv*) data->sol_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p[data->mnum-1],
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, 
+                         rhs_p->elem_p, 
+                         sol_p->elem_p,
+                         &error);
+
+    }
+    else
+    {
+        matlib_zm_sparse* smat_p  = (matlib_zm_sparse*) data->smat_p;
+        matlib_zv* rhs_p = (matlib_zv*) data->rhs_p;
+        matlib_zv* sol_p = (matlib_zv*) data->sol_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         smat_p->elem_p,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, &nrhs,
+                         data->iparam,
+                         &msglvl, 
+                         rhs_p->elem_p, 
+                         sol_p->elem_p,
+                         &error);
+    }
+    err_check( error != 0, clean_up, 
+               "ERROR during solution and refinement (error code: %d)", error);
+
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+static inline matlib_err matlib_xpardiso_free(pardiso_solver_t* data)
+{
+    matlib_int mtype;
+    matlib_index msglvl = PARDISO_MSGLVL; /* Print statistical information in file */
+    matlib_int   error  = 0; /* Initialize error flag */
+    matlib_index maxfct = 1;
+    matlib_index mnum   = 1;
+        
+    matlib_int phase_enum = _E_PARDISO_FREE;
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+
+    matlib_err err = matlib_xmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for real matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+
+    if (data->nsparse > 1)
+    {
+        matlib_xm_nsparse* smat_p = (matlib_xm_nsparse*) data->smat_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         NULL,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, NULL,
+                         data->iparam,
+                         &msglvl, 
+                         NULL, NULL,
+                         &error);
+
+    }
+    else
+    {
+        matlib_xm_sparse* smat_p  = (matlib_xm_sparse*) data->smat_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         NULL,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, NULL,
+                         data->iparam,
+                         &msglvl, 
+                         NULL, NULL,
+                         &error);
+    }
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+static inline matlib_err matlib_zpardiso_free(pardiso_solver_t* data)
+{
+    matlib_int mtype;
+    matlib_index msglvl = PARDISO_MSGLVL; /* Print statistical information in file */
+    matlib_int   error  = 0; /* Initialize error flag */
+    matlib_index maxfct = 1;
+    matlib_index mnum   = 1;
+        
+    matlib_int phase_enum = _E_PARDISO_FREE;
+    debug_body("nr. sparse matrices: %d", data->nsparse);
+
+    matlib_err err = matlib_zmtype(data->mtype, &mtype);
+    err_check( err == MATLIB_FAILURE, clean_up, 
+               "Incorrect option for complex matrix type (mtype: %d)", 
+               PARDISO_MTYPE_ENUM2STR(data->mtype));
+
+    if (data->nsparse > 1)
+    {
+        matlib_zm_nsparse* smat_p = (matlib_zm_nsparse*) data->smat_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         NULL,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, NULL,
+                         data->iparam,
+                         &msglvl, 
+                         NULL, NULL,
+                         &error);
+
+    }
+    else
+    {
+        matlib_zm_sparse* smat_p  = (matlib_zm_sparse*) data->smat_p;
+
+        _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
+                         &mtype, &phase_enum,
+                         &smat_p->lenc,
+                         NULL,
+                         smat_p->rowIn,
+                         smat_p->colIn,
+                         NULL, NULL,
+                         data->iparam,
+                         &msglvl, 
+                         NULL, NULL,
+                         &error);
+    }
+
+    debug_exit( "Exit Status: %s", "SuCCESS");
+    return MATLIB_SUCCESS;
+
+clean_up:
+    debug_exit("Exit Status: %s", "FAILURE");
+    return MATLIB_FAILURE;
+}
+
+/*============================================================================*/
+
+matlib_err matlib_xpardiso(pardiso_solver_t* data)
+/* 
+ * Handles complex as well as real matrices.
+ *
+ * */ 
+{
+    debug_enter("%s", "");
+    matlib_err error = MATLIB_FAILURE;
+
+    if (data->phase_enum == PARDISO_INIT)
+    {
+        error = matlib_pardiso_init(data);
+    }
+    else if (data->phase_enum == PARDISO_ANALYSIS_AND_FACTOR)
+    {
+        error = matlib_xpardiso_AF(data);
+    }
+    else if(data->phase_enum == PARDISO_SOLVE_AND_REFINE)
+    {
+        error = matlib_xpardiso_SR(data);
+    }
+    else if(data->phase_enum == PARDISO_FREE)
+    {
+        error = matlib_xpardiso_free(data);
+    }
+    return error;
+}
+
+matlib_err matlib_zpardiso(pardiso_solver_t* data)
+/* 
+ * Handles complex as well as real matrices.
+ *
+ * */ 
+{
+    debug_enter("%s", "");
+    matlib_err error = MATLIB_FAILURE;
+
+    if (data->phase_enum == PARDISO_INIT)
+    {
+        error = matlib_pardiso_init(data);
+    }
+    else if (data->phase_enum == PARDISO_ANALYSIS_AND_FACTOR)
+    {
+        error = matlib_zpardiso_AF(data);
+    }
+    else if(data->phase_enum == PARDISO_SOLVE_AND_REFINE)
+    {
+        error = matlib_zpardiso_SR(data);
+    }
+    else if(data->phase_enum == PARDISO_FREE)
+    {
+        error = matlib_zpardiso_free(data);
+    }
+    return error;
+}
+
+
+
+/*============================================================================*/
+
 
 void matlib_pardiso(pardiso_solver_t* data)
 /* 
@@ -69,7 +637,9 @@ void matlib_pardiso(pardiso_solver_t* data)
         debug_body("%s", "Start testing PARDISO");
         matlib_index nrhs  = 1; /* Number of right hand sides  */ 
 
-        matlib_index msglvl = 0; /* Print statistical information in file */
+        /* Print statistical information in file */
+        matlib_index msglvl = PARDISO_MSGLVL;
+
         matlib_int error    = 0; /* Initialize error flag */
         debug_body("nr. sparse matrices: %d", data->nsparse);
         matlib_index maxfct = 1;
@@ -83,7 +653,7 @@ void matlib_pardiso(pardiso_solver_t* data)
                 mtype = _E_PARDISO_COMPLEX_SYM;
                 debug_body("%s", "Factoring a complex symmetric matrix");
                 matlib_zm_nsparse* smat_p = (matlib_zm_nsparse*) data->smat_p;
-                _MATLIB_PARDISO ( data->ptr, &maxfct, &mnum,
+                _MATLIB_PARDISO( data->ptr, &maxfct, &mnum,
                           &mtype, &phase_enum,
                           &smat_p->lenc,
                           smat_p->elem_p[data->mnum-1],
@@ -178,7 +748,8 @@ void matlib_pardiso(pardiso_solver_t* data)
     {
         matlib_index nrhs  = 1; /* Number of right hand sides  */ 
 
-        matlib_index msglvl = 0; /* Print statistical information in file */
+        /* Print statistical information in file */
+        matlib_index msglvl = PARDISO_MSGLVL; 
         matlib_int   error  = 0; /* Initialize error flag */
         matlib_index maxfct = 1;
         matlib_index mnum = 1;
@@ -343,7 +914,7 @@ void matlib_pardiso(pardiso_solver_t* data)
     else if(data->phase_enum == PARDISO_FREE)
     {
 
-        matlib_index msglvl = 0; /* Print statistical information in file */
+        matlib_index msglvl = PARDISO_MSGLVL; /* Print statistical information in file */
         matlib_int   error  = 0; /* Initialize error flag */
         matlib_index maxfct = 1;
         matlib_index mnum = 1;

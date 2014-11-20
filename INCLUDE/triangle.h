@@ -64,8 +64,8 @@
 /* #define CDT_ONLY */
 
 
-#define INEXACT /* Nothing */
-/* #define INEXACT volatile */
+//#define INEXACT /* Nothing */
+#define INEXACT volatile
 
 #define FILENAMESIZE 2048
 

@@ -50,7 +50,7 @@ fem2d_err Gaussian_zfunc
     matlib_real* ptr;
     matlib_complex* uptr = u_nodes.elem_p;
 
-    matlib_real a = 5.0;
+    matlib_real a = 1.0;
     matlib_complex factor = 1.0/(1.0 + 4.0 * a * I * t);
 
     for ( ptr = nodes_tmp.elem_p; 
@@ -65,7 +65,17 @@ clean_up:
     debug_exit("exit status: %d", FEM2D_FAILURE);
     return FEM2D_FAILURE;
 }
+#if 0
+char* file_name = "data_dense/mesh_data_circ25_h5Em2_MATLABscale_i5.bin";
+char* file_name = "data_dense/mesh_data_ellipse25by20_h5Em2_MATLABscale_i5.bin";
+char* file_name = "data_dense/mesh_data_rect25by25_h5Em2_MATLABscale_i5.bin";
 
+char* file_name = "data_light/mesh_data_6Disk_5_h5Em2.bin";
+char* file_name = "data_light/mesh_data_Circ_5_h5Em2.bin";
+char* file_name = "data_light/mesh_data_ellipse_5by4_h5Em2.bin";
+char* file_name = "data_light/mesh_data_rect_5by5_h5Em2.bin";
+
+#endif
 
 void pde2d_solve_FSE(void)
 {
@@ -74,7 +84,7 @@ void pde2d_solve_FSE(void)
     matlib_index nr_domains;
     matlib_nv iv;
     fem2d_cc my_nodes;
-    char* file_name = "mesh_data.bin";
+    char* file_name = "data_dense/mesh_data_circ25_h5Em2_MATLABscale_i5.bin";
     fem2d_getmesh(file_name, &my_nodes, &iv);
     nr_domains = iv.len/FEM2D_NV;
 
@@ -144,11 +154,10 @@ void pde2d_solve_FSE(void)
     error = matlib_create_zv( my_nodes.len, &v_nodes , MATLIB_COL_VECT);
     error = matlib_create_zv( my_nodes.len, &u_prj   , MATLIB_COL_VECT);
 
-    matlib_real t = 0;
-    error = Gaussian_zfunc(my_nodes, u_nodes, t);
+    error = Gaussian_zfunc(my_nodes, u_nodes, 0);
     error = fem2d_NB_zprj(ea, u_nodes, u_prj);
     
-    matlib_index Nt = 100;
+    matlib_index Nt = 1000;
     /* Initialize solver data */ 
     pardiso_solver_t data = { .nsparse  = 1, 
                               .mnum     = 1, 
@@ -160,35 +169,54 @@ void pde2d_solve_FSE(void)
 
     debug_body("%s", "Solver data initialized");
     data.phase_enum = PARDISO_INIT;
-    matlib_pardiso(&data);
+    matlib_zpardiso(&data);
 
     data.phase_enum = PARDISO_ANALYSIS_AND_FACTOR;
-    matlib_pardiso(&data);
+    matlib_zpardiso(&data);
     
-    matlib_real e_relative, norm_actual;
+    matlib_real norm_actual;
+    matlib_xv e_rel, t_vec;
+    error = matlib_create_xv( Nt, &e_rel, MATLIB_COL_VECT);
+    error = matlib_create_xv( Nt, &t_vec, MATLIB_COL_VECT);
+
+    e_rel.elem_p[0] = 0;
+    t_vec.elem_p[0] = 0;
 
     for (i = 1; i < Nt; i++)
     {
         data.phase_enum = PARDISO_SOLVE_AND_REFINE;
-        matlib_pardiso(&data);
+        matlib_zpardiso(&data);
 
         error = matlib_zaxpby(2.0, v_nodes, -1.0, u_nodes);
         error = fem2d_NB_zprj(ea, u_nodes, u_prj);
 
-        t += dt;
-        error = Gaussian_zfunc(my_nodes, v_nodes, t);
+        t_vec.elem_p[i] = t_vec.elem_p[i-1] + dt;
+        error = Gaussian_zfunc(my_nodes, v_nodes, t_vec.elem_p[i]);
         norm_actual = fem2d_NB_znormL2( ea, v_nodes);
-        debug_body("Actual norm: %0.16f", norm_actual);
         
         error = matlib_zaxpy(-1.0, u_nodes, v_nodes);
 
-        e_relative = fem2d_NB_znormL2( ea, v_nodes)/norm_actual;
-        debug_body("Relative error: %0.16g", e_relative);
+        e_rel.elem_p[i] = fem2d_NB_znormL2( ea, v_nodes)/norm_actual;
+        debug_body( "Actual norm: %0.6g, Relative error[%d]: %0.6g",
+                    norm_actual, i, e_rel.elem_p[i]);
 
     }
+    matlib_io_t mp;
+    matlib_io_create( 3, &mp);
+    mp.data_p[0] = &e_rel;
+    mp.data_p[1] = &t_vec;
+    mp.data_p[2] = &u_nodes;
+
+    mp.format[0] = MATLIB_XV;
+    mp.format[1] = MATLIB_XV;
+    mp.format[2] = MATLIB_ZV;
+
+    matlib_io_fwrite(&mp, "error_data.bin");
+    matlib_io_free(&mp);
+
 
     data.phase_enum = PARDISO_FREE;
-    matlib_pardiso(&data);
+    matlib_zpardiso(&data);
 
     matlib_free(M.elem_p);
     matlib_free(M.rowIn);

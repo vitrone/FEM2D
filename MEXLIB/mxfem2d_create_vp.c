@@ -17,7 +17,7 @@ void mexFunction
     const mxArray* prhs[]
 )
 {
-    if(nrhs<2) 
+    if (nrhs < 2) 
     {
         mexErrMsgTxt("At least two inputs required.");
     }
@@ -25,22 +25,22 @@ void mexFunction
     matlib_real*  plist = mxGetPr(prhs[0]);
     matlib_index* tlist = (matlib_index*) mxGetPr(prhs[1]);
 
-    if(mxGetM(prhs[0]) != 2)
+    if (mxGetM(prhs[0]) != 2)
     {
         mexErrMsgTxt("Size of point list is incorrect.");
     } 
-    if(mxGetM(prhs[1]) != 3)
+    if (mxGetM(prhs[1]) != 3)
     {
         mexErrMsgTxt("Size of triangle list is incorrect.");
     } 
 
     matlib_index nr_nodes  = mxGetN(prhs[0]);
     matlib_index nr_domains = mxGetN(prhs[1]);
-    if(nr_nodes < 3)
+    if (nr_nodes < 3)
     {
         mexErrMsgTxt("At least three nodes are needed.");
     } 
-    if(nr_domains < 1)
+    if (nr_domains < 1)
     {
         mexErrMsgTxt("At least one triangle is needed.");
     } 
@@ -127,4 +127,6 @@ void mexFunction
         }
         mxSetFieldByNumber(plhs[0], i, POS_NODE_ORDER, mxNO);
     }
+
+    fem2d_free_ea(ea);
 }
